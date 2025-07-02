@@ -1,0 +1,308 @@
+/* TelegramReportWizardPage.module.css */
+
+.startPage {
+  min-height: 100vh;
+  background: #f8fafc;
+  padding: 32px 0 40px 0;
+}
+
+.centerWrapper {
+  max-width: 1620px;        /* Было 1100px — стало шире */
+  margin: 0 auto;
+  padding: 0 12px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 28px;      /* чуть больше для эффекта */
+  box-shadow: 0 6px 42px #60baff19, 0 2px 12px #84b7ff12;
+  padding: 44px 44px 58px 44px;
+}
+
+.title {
+  font-size: 2.7rem;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.02em;
+  margin-bottom: 30px;
+}
+
+.mainGrid3col {
+  display: grid;
+  grid-template-columns: 440px 1.5fr 370px;  /* Увеличили в 2+ раза левую колонку */
+  gap: 56px;        /* Больше воздуха между колонками */
+  margin-top: 36px;
+}
+
+.stepsColumn {
+  background: linear-gradient(150deg, #101f2d 80%, #1a3550 100%);
+  border-radius: 26px;
+  padding: 34px 28px 46px 34px;
+  box-shadow: 0 4px 24px #0517331c;
+  min-height: 700px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stepperWrap {
+  width: 100%;
+}
+
+.progressBar {
+  height: 7px;
+  background: #162c43;
+  border-radius: 8px;
+  margin-bottom: 34px;
+  overflow: hidden;
+}
+.progressInner {
+  height: 100%;
+  background: linear-gradient(90deg, #00ffea, #13e0ff, #2fa3ff);
+  border-radius: 8px;
+  transition: width 0.6s cubic-bezier(.5,2,.5,1);
+}
+
+.stepsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stepItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  padding: 20px 0 20px 4px;
+  font-size: 1.19rem;
+  color: #c1d4f7;
+  border-left: 3.7px solid transparent;
+  cursor: pointer;
+  transition: background 0.18s;
+  border-radius: 12px;
+  margin-bottom: 2px;
+}
+.stepItem:hover,
+.stepItem.active {
+  background: #00314438;
+  color: #fff;
+  border-left: 4px solid #00ffe7;
+  font-weight: 500;
+}
+.stepItem.done {
+  color: #80ffd7;
+  font-weight: 600;
+  background: #0a4b6250;
+  border-left: 4px solid #08e2ff;
+}
+
+.stepNum {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #13d1ff 40%, #057ef9 100%);
+  color: #fff;
+  font-weight: 700;
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20px;
+  border: 2.5px solid #e6f9ff;
+  box-shadow: 0 2px 12px #09f2ff21;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+}
+
+.iconDone {
+  color: #10e76d;
+  background: #062c21;
+  border-radius: 50%;
+  width: 33px;
+  height: 33px;
+}
+.stepLabel {
+  font-size: 1.12rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 2px;
+}
+.stepDesc {
+  font-size: 1.01rem;
+  color: #84c9f9;
+  margin-top: 1px;
+}
+
+.chevron {
+  margin-left: auto;
+  color: #0bffe7;
+  opacity: 0.45;
+}
+
+.formColumn {
+  padding: 32px 12px 0 24px;
+}
+
+.formArea {
+  background: none;
+}
+
+.templatesList {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.templateItem {
+  padding: 22px 30px 16px 30px;
+  background: #eaf8ff;
+  border-radius: 17px;
+  cursor: pointer;
+  margin-bottom: 3px;
+  transition: background 0.2s, box-shadow 0.15s;
+  border: 2.2px solid transparent;
+  font-size: 1.11rem;
+}
+.templateItem:hover,
+.activeTemplate {
+  background: linear-gradient(93deg, #00fff3 0%, #e1f3ff 85%);
+  border-color: #34f7ea;
+  box-shadow: 0 3px 16px #62e6fe2c;
+  font-weight: 600;
+}
+.templateDesc {
+  font-size: 1.01rem;
+  color: #5f7c97;
+  margin-top: 5px;
+}
+
+.inputGroup {
+  margin: 21px 0 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.input {
+  border: 1.3px solid #c8e3f9;
+  border-radius: 9px;
+  padding: 13px 16px;
+  font-size: 1.14rem;
+  width: 100%;
+  margin-top: 4px;
+  transition: border 0.16s;
+}
+.input:focus {
+  outline: none;
+  border: 1.7px solid #36ecfa;
+  background: #e7fcff;
+}
+
+.bigBtn,
+.miniBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  outline: none;
+  border-radius: 13px;
+  font-size: 1.16rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(97deg, #10e9f8 0%, #00aaff 100%);
+  color: #fff;
+  box-shadow: 0 3px 16px #0cbcf433;
+  transition: background 0.13s, box-shadow 0.13s;
+  padding: 17px 44px;
+  margin-top: 2px;
+}
+.bigBtn:active {
+  background: #13b8ee;
+}
+.bigBtn.disabled,
+.bigBtn:disabled {
+  opacity: 0.57;
+  background: #b9eff9;
+  cursor: not-allowed;
+}
+
+.miniBtn {
+  font-size: 1.06rem;
+  padding: 10px 22px;
+  background: #f0fbff;
+  color: #15bcf9;
+  border: 1.6px solid #6eeaff;
+  margin-left: 8px;
+  border-radius: 9px;
+  box-shadow: none;
+  margin-bottom: 3px;
+}
+.miniBtn:active {
+  background: #c5f7fc;
+}
+
+.previewBlock {
+  border: 1.6px solid #c2e6f6;
+  border-radius: 15px;
+  background: #f5fafd;
+  padding: 22px 30px;
+  font-size: 1.12rem;
+  margin: 11px 0 25px 0;
+}
+
+.logoWrap {
+  text-align: right;
+  padding: 6px 0 18px 0;
+}
+.logo {
+  max-width: 150px;
+  height: auto;
+  border-radius: 12px;
+  margin-top: 12px;
+}
+
+.subtitle {
+  font-size: 1.13rem;
+  color: #369ecb;
+  font-weight: 500;
+  margin-top: 38px;
+}
+
+@media (max-width: 1350px) {
+  .centerWrapper {
+    max-width: 1100px;
+  }
+  .mainGrid3col {
+    grid-template-columns: 350px 1fr 260px;
+    gap: 24px;
+  }
+  .stepsColumn {
+    min-height: 540px;
+    padding: 20px 10px 24px 14px;
+  }
+}
+
+@media (max-width: 950px) {
+  .mainGrid3col {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .stepsColumn {
+    min-height: unset;
+    margin-bottom: 24px;
+    width: 100%;
+  }
+  .buttonsColumn {
+    margin-top: 24px;
+  }
+}
+
+@media (max-width: 600px) {
+  .card {
+    padding: 10px 2vw 20px 2vw;
+  }
+  .mainGrid3col {
+    gap: 8px;
+  }
+  .stepsColumn {
+    border-radius: 10px;
+  }
+}

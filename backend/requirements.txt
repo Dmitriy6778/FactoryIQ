@@ -1,0 +1,8 @@
+python-dotenv
+pyodbc
+asyncua
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-core
+typing-extensions

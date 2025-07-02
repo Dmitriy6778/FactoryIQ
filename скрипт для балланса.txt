@@ -1,0 +1,109 @@
+CREATE OR ALTER PROCEDURE sp_GetBalanceReport
+    @date_from DATE,
+    @date_to DATE,
+    @tag_ids NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Список тегов из JSON
+    DECLARE @TagTable TABLE(TagId INT);
+    INSERT INTO @TagTable(TagId)
+    SELECT value FROM OPENJSON(@tag_ids);
+
+    ;WITH DateRange AS (
+        SELECT @date_from AS [Date]
+        UNION ALL
+        SELECT DATEADD(DAY, 1, [Date]) FROM DateRange WHERE [Date] < @date_to
+    ),
+    Shifts AS (
+        SELECT 1 AS ShiftNo, N'Дневная' AS ShiftName, CAST('08:00:00' AS time) AS ShiftStart, CAST('19:59:59' AS time) AS ShiftEnd
+        UNION ALL
+        SELECT 2, N'Ночная', CAST('20:00:00' AS time), CAST('07:59:59' AS time)
+    ),
+    TagList AS (
+        SELECT t.TagId, ot.BrowseName
+        FROM @TagTable t
+        JOIN OpcTags ot ON ot.Id = t.TagId
+    ),
+    ShiftData AS (
+        SELECT 
+            dr.[Date],
+            s.ShiftNo,
+            s.ShiftName,
+            t.BrowseName AS TagName,
+            MIN(od.Value) AS StartValue,
+            MAX(od.Value) AS EndValue,
+            MAX(od.Value) - MIN(od.Value) AS Delta
+        FROM DateRange dr
+        CROSS JOIN Shifts s
+        CROSS JOIN TagList t
+        LEFT JOIN OpcData od ON
+            od.TagId = t.TagId
+            AND (
+                (s.ShiftNo = 1 AND CAST(od.Timestamp AS DATE) = dr.[Date] AND CAST(od.Timestamp AS time) BETWEEN s.ShiftStart AND s.ShiftEnd)
+                OR
+                (s.ShiftNo = 2 AND (
+                    (CAST(od.Timestamp AS DATE) = dr.[Date] AND CAST(od.Timestamp AS time) BETWEEN s.ShiftStart AND CAST('23:59:59' AS time))
+                    OR
+                    (CAST(od.Timestamp AS DATE) = DATEADD(DAY, 1, dr.[Date]) AND CAST(od.Timestamp AS time) BETWEEN CAST('00:00:00' AS time) AND s.ShiftEnd)
+                ))
+            )
+        GROUP BY dr.[Date], s.ShiftNo, s.ShiftName, t.TagId, t.BrowseName
+    ),
+    DailyData AS (
+        SELECT 
+            sd.[Date],
+            NULL AS ShiftNo,         -- для UNION структура та же!
+            N'Сутки' AS ShiftName,
+            sd.TagName,
+            MIN(sd.StartValue) AS StartValue,
+            MAX(sd.EndValue) AS EndValue,
+            SUM(sd.Delta) AS Delta
+        FROM ShiftData sd
+        GROUP BY sd.[Date], sd.TagName
+    )
+    -- Весь итоговый SELECT объявлен ОДИН РАЗ, с именами, далее -- ORDER BY
+    SELECT 
+        [Date],
+        ShiftNo,
+        ShiftName AS [Смена],
+        TagName,
+        StartValue AS [Начало],
+        EndValue AS [Конец],
+        Delta AS [Прирост]
+    FROM (
+        SELECT 
+            [Date],
+            ShiftNo,
+            ShiftName,
+            TagName,
+            StartValue,
+            EndValue,
+            Delta
+        FROM ShiftData
+
+        UNION ALL
+
+        SELECT 
+            [Date],
+            ShiftNo,
+            ShiftName,
+            TagName,
+            StartValue,
+            EndValue,
+            Delta
+        FROM DailyData
+    ) AS Unioned
+    ORDER BY 
+        [Date], 
+        -- Чтобы "Сутки" были в конце дня, ставим SortOrder: дневная(1), ночная(2), сутки(3)
+        CASE 
+            WHEN ShiftName = N'Дневная' THEN 1
+            WHEN ShiftName = N'Ночная' THEN 2
+            ELSE 3
+        END,
+        TagName
+
+    OPTION (MAXRECURSION 1000);
+END

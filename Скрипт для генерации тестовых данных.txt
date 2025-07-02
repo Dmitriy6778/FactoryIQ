@@ -1,0 +1,82 @@
+-- Очистить старые тестовые данные (ОСТОРОЖНО! если таблица общая)
+DELETE FROM OPCData WHERE TagId IN (1,2,3,4,5,6,7);
+SET LANGUAGE us_english;
+DECLARE @dt DATETIME = '2025-01-01 00:00:00';
+DECLARE @end DATETIME = '2025-07-01 00:00:00';
+
+DECLARE
+    @sunflower DECIMAL(12,3),   -- Входящий подсолнечник (TagId=1)
+    @huls DECIMAL(12,3),        -- Луза (TagId=2)
+    @meal DECIMAL(12,3),        -- Жмых (TagId=3)
+    @oil DECIMAL(12,3),         -- Прессовое масло (TagId=4)
+    @extr DECIMAL(12,3),        -- Экстракционное масло (TagId=5)
+    @toast DECIMAL(12,3),       -- Тостированный шрот (TagId=6)
+    @gran DECIMAL(12,3);        -- Гранулированный шрот (TagId=7)
+
+-- Начальные значения
+SET @sunflower = 80000; -- начальный счётчик подсолнечника
+SET @huls      = 30000;
+SET @meal      = 40000;
+SET @oil       = 25000;
+SET @extr      = 20000;
+SET @toast     = 35000;
+SET @gran      = 12000;
+
+WHILE @dt < @end
+BEGIN
+    DECLARE @seed_increment DECIMAL(12,3);
+
+    -- Средний прирост за минуту (500 тонн/сутки)
+    IF DATEPART(HOUR, @dt) BETWEEN 8 AND 19
+        SET @seed_increment = 347 + ROUND(RAND()*20, 2);  -- дневная смена: 347..367 кг
+    ELSE
+        SET @seed_increment = 330 + ROUND(RAND()*20, 2);  -- ночная смена: 330..350 кг
+
+    -- Аварии и скачки
+    IF DATEPART(DAY, @dt) % 7 = 0 AND DATEPART(HOUR, @dt) = 15 AND DATEPART(MINUTE, @dt) = 0
+        SET @seed_increment = 50 + ROUND(RAND()*10, 2);   -- авария: почти не подали
+    IF DATEPART(DAY, @dt) % 11 = 0 AND DATEPART(HOUR, @dt) = 18 AND DATEPART(MINUTE, @dt) = 0
+        SET @seed_increment = 800 + ROUND(RAND()*40, 2);  -- скачок: сразу два вагона
+
+    -- Обновляем семена
+    SET @sunflower = @sunflower + @seed_increment;
+
+    -- Расчёт пропорций по Гост
+    -- Примерные значения:
+    -- Луза:        18...22% от семян
+    -- Жмых:        38...45%
+    -- Пресс-масло: 18...20%
+    -- Экстракц.м.: 11...14%
+    -- Тост шрот:   60...65% от семян
+    -- Гранулы:      9...14%
+
+    -- Луза
+    SET @huls = @huls + ROUND(@seed_increment * (0.19 + RAND()*0.03), 2);
+    -- Жмых
+    SET @meal = @meal + ROUND(@seed_increment * (0.41 + RAND()*0.06), 2);
+    -- Прессовое масло
+    SET @oil = @oil + ROUND(@seed_increment * (0.18 + RAND()*0.02), 2);
+    -- Экстракционное масло
+    SET @extr = @extr + ROUND(@seed_increment * (0.12 + RAND()*0.03), 2);
+    -- Тостированный шрот
+    SET @toast = @toast + ROUND(@seed_increment * (0.62 + RAND()*0.05), 2);
+    -- Гранулированный шрот
+    SET @gran = @gran + ROUND(@seed_increment * (0.11 + RAND()*0.03), 2);
+
+    -- Имитация выбросов/аварий для продуктов (редко)
+    IF DATEPART(DAY, @dt) % 17 = 0 AND DATEPART(HOUR, @dt) = 5 AND DATEPART(MINUTE, @dt) = 0
+        SET @oil = @oil + 200 + ROUND(RAND()*100,2); -- аномальный выброс масла
+
+    -- Вставка значений (одна строка на каждый тег)
+    INSERT INTO OPCData (TagId, [Value], [Timestamp])
+        VALUES (1, @sunflower, @dt),   -- Sunflower
+               (2, @huls,      @dt),   -- Huls
+               (3, @meal,      @dt),   -- Meal
+               (4, @oil,       @dt),   -- PressOil
+               (5, @extr,      @dt),   -- ExtractedOil
+               (6, @toast,     @dt),   -- ToastMeal
+               (7, @gran,      @dt);   -- GranMeal
+
+    -- Следующая минута
+    SET @dt = DATEADD(MINUTE, 1, @dt);
+END

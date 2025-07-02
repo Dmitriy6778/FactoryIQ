@@ -1,0 +1,318 @@
+/* Основной фон и центрирование */
+.startPage,
+.opcPage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f7f7fa;
+}
+
+.centerWrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100vw;
+    min-height: 100vh;
+}
+
+/* Общая карточка */
+.card {
+    background: #fff;
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(100, 100, 140, .15);
+    padding: 2.1rem 2.5rem 2.7rem 2.5rem;
+    width: 720px;
+    max-width: 99vw;
+    text-align: left;
+    margin: 0 auto;
+    font-family: 'Montserrat', Arial, sans-serif;
+    position: relative;
+}
+
+.title {
+    text-align: center;
+    font-size: 2.05rem;
+    font-weight: 700;
+    color: #1a2947;
+    margin: 0 0 1.2rem 0;
+    letter-spacing: 1px;
+}
+
+.sectionTitle {
+    font-weight: 600;
+    font-size: 1.21rem;
+    margin-top: 1.3rem;
+    margin-bottom: 0.85rem;
+    color: #224b60;
+    letter-spacing: 0.01em;
+    border-left: 4px solid #00ffc6;
+    padding-left: 0.75rem;
+}
+
+.sectionTitleMini {
+    font-size: 1.01rem;
+    color: #217b92;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+/* Инпуты и селекты */
+.input {
+    font-family: inherit;
+    width: 100%;
+    min-width: 0;
+    padding: 0.54rem 0.98rem;
+    border-radius: 7px;
+    border: 1.2px solid #dde2f3;
+    font-size: 1rem;
+    margin-bottom: 0.07rem;
+    background: #f8fafc;
+    transition: border .18s;
+    margin-right: 0.55rem;
+    box-sizing: border-box;
+}
+
+.input:focus {
+    border: 1.5px solid #00ffc6;
+    outline: none;
+}
+
+.addServerBlock {
+    display: flex;
+    gap: 0.44rem;
+    margin-bottom: 0.15rem;
+    align-items: center;
+}
+
+.iconBtn {
+    background: linear-gradient(90deg, #eafaff 0%, #b8e8fa 100%);
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px #00ffc630;
+    color: #1a99b7;
+    padding: 0.28rem 0.69rem;
+    margin-right: 0.07rem;
+    cursor: pointer;
+    font-size: 1.17rem;
+    display: flex;
+    align-items: center;
+    transition: background 0.19s, box-shadow 0.19s;
+}
+
+.iconBtn:hover {
+    background: linear-gradient(90deg, #b6f6e6 0%, #9fdbff 100%);
+    box-shadow: 0 4px 16px #00ffc670;
+}
+
+.button {
+    background: linear-gradient(90deg, #00ffc6 0%, #0089fc 100%);
+    color: #172339;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 1.09rem;
+    font-weight: 700;
+    padding: 0.55rem 1.1rem;
+    cursor: pointer;
+    transition: box-shadow 0.19s, background 0.19s;
+    box-shadow: 0 2px 8px #00ffc630;
+    margin-right: 0.12rem;
+    margin-bottom: 0.09rem;
+}
+
+.button,
+.smallBtn {
+    transition: box-shadow 0.15s, background 0.13s;
+}
+
+.button:hover,
+.smallBtn:hover {
+    box-shadow: 0 2px 16px #00ffd28e, 0 0px 0px #09f3b1;
+    background: linear-gradient(90deg, #b2fff4 0%, #6dbbff 100%);
+    color: #17455f;
+}
+
+.button:hover:not(:disabled) {
+    background: linear-gradient(90deg, #00ffc6 10%, #00b9ff 100%);
+    box-shadow: 0 4px 16px #00ffc6a8;
+}
+
+.button:disabled {
+    opacity: 0.6;
+    filter: grayscale(40%);
+    box-shadow: none;
+    pointer-events: none;
+}
+
+/* Таблица серверов и тегов */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.7rem 0 0.6rem 0;
+    background: #f8fcff;
+    border-radius: 9px;
+    box-shadow: 0 1px 12px #00ffc619;
+    overflow: hidden;
+    font-size: 0.98rem;
+}
+
+.table th,
+.table td {
+    border-bottom: 1px solid #e6eef8;
+    padding: 0.56rem 0.58rem;
+    text-align: left;
+    font-weight: 400;
+    font-size: 0.99rem;
+}
+
+.table th {
+    background: #e4f8fd;
+    color: #26758b;
+    font-weight: 600;
+}
+
+.table tr:last-child td {
+    border-bottom: none;
+}
+
+.table tr:hover {
+    background: #eefcff;
+}
+
+.table .ellipsis {
+    max-width: 160px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.smallBtn {
+    font-size: 1.07rem;
+    background: linear-gradient(90deg, #f2fffa 0%, #d8f2fa 100%);
+    color: #2376b3;
+    border: none;
+    border-radius: 7px;
+    padding: 0.22rem 0.75rem;
+    cursor: pointer;
+    margin-right: 3px;
+    margin-bottom: 2px;
+    transition: background 0.17s, box-shadow 0.15s;
+    box-shadow: 0 1px 4px #00ffc610;
+}
+
+.smallBtn:hover {
+    background: linear-gradient(90deg, #aff9e8 0%, #bad8ff 100%);
+    color: #1d475a;
+}
+
+/* Блоки лога, найденных серверов, тегов */
+.scanPanel {
+    display: flex;
+    align-items: center;
+    gap: 0.36rem;
+    margin-bottom: 0.18rem;
+}
+
+.logPanel {
+    margin: 0.6rem 0 0.2rem 0;
+    font-size: 0.97rem;
+    color: #2b507b;
+    background: #f2fafd;
+    border-radius: 7px;
+    padding: 0.55rem 1rem;
+    min-height: 22px;
+}
+
+.foundBlock {
+    margin: 0.5rem 0 0.35rem 0;
+    padding: 0.5rem 1rem;
+    background: #e7fff5;
+    border-radius: 7px;
+    color: #227b6d;
+}
+
+.status {
+    margin: 0.5rem 0;
+    font-size: 1rem;
+    color: #00b09b;
+    font-weight: 600;
+}
+
+.statusOk {
+    color: #13d477;
+    font-weight: bold;
+    margin-top: 1.1rem;
+}
+
+.statusError {
+    color: #fd225d;
+    font-weight: bold;
+    margin-top: 1.1rem;
+}
+
+/* Работа с тегами */
+.tableBlock {
+    margin-bottom: 1rem;
+}
+
+.valueEmpty {
+    color: #b4c0d9;
+    font-size: 1.13em;
+}
+
+.archived {
+    background: #e7ffe5 !important;
+    color: #23a031;
+    font-weight: 600;
+}
+
+.tagBtnsRow {
+    display: flex;
+    gap: 0.55rem;
+    margin: 0.13rem 0 0.43rem 0;
+}
+
+.tagBtnsRow button {
+    background: linear-gradient(90deg, #eaf7ff 0%, #b8e8fa 100%);
+    color: #227b6d;
+    font-size: 0.98rem;
+    font-weight: 500;
+    border-radius: 7px;
+    border: none;
+    padding: 0.34rem 1.12rem;
+    margin-bottom: 0.1rem;
+    box-shadow: 0 2px 6px #00ffc61a;
+    cursor: pointer;
+    transition: background 0.17s;
+}
+
+.tagBtnsRow button:hover {
+    background: linear-gradient(90deg, #a8ffe2 0%, #b3e6fc 100%);
+}
+
+@keyframes fadeInRow {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.table tbody tr:hover {
+    background: #f1fcff;
+    box-shadow: 0 4px 18px #00fff547;
+    transition: box-shadow 0.18s, background 0.15s;
+    cursor: pointer;
+}
+
+.table tbody tr {
+    animation: fadeInRow 1.05s cubic-bezier(.53, -.18, .38, 1.18);
+}
+
+
+/* Адаптивность ОТКЛЮЧЕНА (серверное приложение) */

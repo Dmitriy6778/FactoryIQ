@@ -1,0 +1,204 @@
+.page {
+    max-width: 1420px;
+    margin: 32px auto;
+    background: #fafdff66;
+    border-radius: 28px;
+    box-shadow: 0 2px 24px 0 #d4fcf7cc;
+    padding: 24px 32px 42px 32px;
+    min-height: 80vh;
+    transition: box-shadow 0.15s, background 0.2s;
+    font-family: 'Montserrat', Arial, sans-serif;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    font-size: 1.44rem;
+    font-weight: 700;
+    color: #162649;
+    margin-bottom: 1.4rem;
+    letter-spacing: 0.02em;
+}
+
+.backBtn {
+    background: none;
+    border: none;
+    margin-right: 10px;
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity .18s;
+    padding: 0;
+}
+
+.backBtn:hover {
+    opacity: 1;
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    position: relative;
+}
+
+.inputWrapper {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    min-width: 300px;
+}
+
+.input {
+    padding: 0.53rem 1.05rem;
+    border: 1.5px solid #e1f6f5;
+    border-radius: 8px;
+    font-size: 1.08rem;
+    background: #f5fdff;
+    transition: border .18s;
+    font-family: inherit;
+    min-width: 140px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    padding: 0 10px;
+    font-size: 15px;
+    box-sizing: border-box;
+}
+
+.input:focus {
+    border: 1.6px solid #00ffc6;
+    outline: none;
+}
+
+.tagDropdown {
+    max-height: 150px;
+    overflow-y: auto;
+    border: 1px solid #ccc;
+    background: #fff;
+    position: absolute;
+    z-index: 1000;
+    width: 100%;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    margin-top: 2px;
+}
+
+.tagDropdown div {
+    padding: 8px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+    font-size: 14px;
+    color: #222;
+    user-select: none;
+}
+
+.tagDropdown div:hover {
+    background-color: #00ffc6aa;
+    color: #005;
+}
+
+.selectedTagsContainer {
+    margin-top: 10px;
+    min-height: 36px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.selectedTag {
+    display: inline-flex;
+    align-items: center;
+    background: #00ffc655;
+    color: #005;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: default;
+    user-select: none;
+    font-size: 14px;
+}
+
+.selectedTag svg {
+    margin-left: 6px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.selectedTag svg:hover {
+    color: #e63946;
+}
+
+.checkboxLabel {
+    font-size: 14px;
+    color: #222;
+    margin-right: 8px;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.button {
+    background: linear-gradient(90deg, #00ffc6 0%, #0089fc 100%);
+    color: #193956;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    padding: 0.54rem 1.23rem;
+    font-size: 1.05rem;
+    box-shadow: 0 2px 8px #00ffc630;
+    cursor: pointer;
+    transition: box-shadow 0.17s, background 0.16s;
+    min-width: 180px;
+    margin-top: 20px;
+}
+
+.button:hover {
+    background: linear-gradient(90deg, #b2fff4 0%, #00aaff 100%);
+    color: #13455f;
+}
+
+.chartBlock {
+    width: 100%;
+    min-width: 900px;
+    margin: 24px auto 0 auto;
+    background: #fafdffcc;
+    border-radius: 28px;
+    box-shadow: 0 4px 24px 0 #00ffc611, 0 1.5px 6px 0 #b7d0e566;
+    padding: 36px 32px 32px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow 0.15s, background 0.2s;
+    overflow-x: auto;
+    min-height: 400px;
+    box-sizing: border-box;
+}
+
+.noData {
+    color: #93aec9;
+    font-size: 1.15rem;
+    text-align: center;
+}
+
+/* Стили для select, input в одной строке, если нужно */
+.controls select,
+.controls input[type="date"] {
+    flex: 1 1 140px;
+    min-width: 140px;
+}
+
+.controls>div {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* Стили для тултипов и подсказок */
+.inputHint {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-top: 2px;
+    min-height: 16px;
+    line-height: 1.1;
+}
