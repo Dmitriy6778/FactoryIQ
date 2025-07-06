@@ -10,8 +10,6 @@ from dotenv import load_dotenv
 load_dotenv()
 from config import get_conn_str
 
-
-# Пути к сертификату и ключу (указывай абсолютные или относительные пути, если ты из app запускаешь)
 CERT_PATH = os.path.abspath("app/client_cert.pem")
 KEY_PATH = os.path.abspath("app/client_private.pem")
 
@@ -29,6 +27,15 @@ def get_task_tags(conn, polling_task_id):
         WHERE pt.polling_task_id = ?
     """, polling_task_id)
     return cursor.fetchall()
+
+def safe_float(val):
+    try:
+        if val is None or str(val).strip() == "" or str(val).lower() in ["nan", "inf", "-inf"]:
+            return None
+        return float(val)
+    except Exception:
+        return None
+
 def poll_task(task_id, server_url, tag_ids, interval_seconds, stop_event,
               username, password, security_policy, security_mode):
     async def do_poll():
@@ -38,14 +45,12 @@ def poll_task(task_id, server_url, tag_ids, interval_seconds, stop_event,
                 print(f"[POLL WORKER] Connecting to {server_url} (policy={security_policy}, mode={security_mode}, user={username})")
                 client = Client(server_url, timeout=5)
 
-                # Проверим — нужен ли сертификат?
                 use_cert = os.path.isfile(CERT_PATH) and os.path.isfile(KEY_PATH)
                 if use_cert:
                     security_str = f"{security_policy},{security_mode},{CERT_PATH},{KEY_PATH}"
                 else:
                     security_str = f"{security_policy},{security_mode},,"
 
-                # 1. Узнать поддерживаемые политики сервера (debug 1 раз)
                 try:
                     endpoints = await client.connect_and_get_server_endpoints()
                     print("=== Доступные endpoint'ы сервера ===")
@@ -54,7 +59,6 @@ def poll_task(task_id, server_url, tag_ids, interval_seconds, stop_event,
                 except Exception as ex:
                     print(f"[DEBUG] Не удалось получить endpoint descriptions: {ex}")
 
-                # 2. Установить security (обязательно 4 параметра!)
                 await client.set_security_string(security_str)
 
                 if username:
@@ -80,6 +84,10 @@ def poll_task(task_id, server_url, tag_ids, interval_seconds, stop_event,
                         for nodeid in tag_ids:
                             try:
                                 val = await client.get_node(nodeid).get_value()
+                                float_val = safe_float(val)
+                                if float_val is None:
+                                    print(f"[POLL WORKER] Пропущено невалидное значение для {nodeid}: {repr(val)} ({type(val)})")
+                                    continue
                                 with pyodbc.connect(get_conn_str()) as conn:
                                     cur = conn.cursor()
                                     cur.execute("SELECT Id FROM OpcTags WHERE NodeId=?", nodeid)
@@ -88,7 +96,7 @@ def poll_task(task_id, server_url, tag_ids, interval_seconds, stop_event,
                                         tag_id = tag_row[0]
                                         cur.execute(
                                             "INSERT INTO OpcData (TagId, Value, Timestamp, Status) VALUES (?, ?, GETDATE(), 'Good')",
-                                            tag_id, float(val)
+                                            tag_id, float_val
                                         )
                                         conn.commit()
                                     else:

@@ -1,26 +1,32 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Body, HTTPException
 from .models import OpcTag
 from ..db import get_db_connection
 from asyncua import Client, ua
 import asyncio
 from pydantic import BaseModel
-from typing import List
-from fastapi import Body
-from fastapi import HTTPException
-from app.routers.servers import get_configured_client  # убедись что он доступен
+from typing import List, Optional
+from app.routers.servers import get_configured_client
 import base64
+import os
+from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
+import math
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
 class LiveRequest(BaseModel):
     endpoint_url: str
     node_ids: List[str]
+    opcUsername: Optional[str] = ""
+    opcPassword: Optional[str] = ""
+    securityPolicy: Optional[str] = "Basic256Sha256"
+    securityMode: Optional[str] = "Sign"
 
 class TagInfo(BaseModel):
     node_id: str
     browse_name: str = ""
     data_type: str = ""
     description: str = ""
+    path: str = ""
 
 class AddTagsRequest(BaseModel):
     server_id: int
@@ -28,6 +34,134 @@ class AddTagsRequest(BaseModel):
 
 class TagDescUpdate(BaseModel):
     description: str
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # корень /app
+
+CLIENT_CERT_PATH = os.path.join(BASE_DIR, "client.der")
+CLIENT_KEY_PATH = os.path.join(BASE_DIR, "client_private.der")
+SERVER_CERT_PATH = os.path.join(BASE_DIR, "pki", "trusted", "certs", "PLC-PE_OPCUA.der")
+
+def get_policy_class(policy_name):
+    # Можно расширить при необходимости
+    if policy_name == "Basic256Sha256":
+        return SecurityPolicyBasic256Sha256
+    # Добавить другие по необходимости
+    raise ValueError(f"Неизвестная политика безопасности: {policy_name}")
+class LiveRequest(BaseModel):
+    tag_ids: List[int]  # список id из OpcTags
+    server_id: Optional[int] = None   # если фильтруем по серверу
+
+@router.post("/live")
+def get_live_from_db(req: LiveRequest):
+    """
+    Возвращает актуальные значения для заданных тегов (по id) из таблицы OpcData.
+    """
+    if not req.tag_ids:
+        return {"ok": False, "error": "Не переданы tag_ids"}
+    tag_ids = tuple(req.tag_ids)
+
+    # Составляем запрос: получить последнее значение для каждого tag_id
+    sql = f"""
+    SELECT d.TagId, d.Value, d.Timestamp, d.Status
+    FROM OpcData d
+    INNER JOIN (
+        SELECT TagId, MAX(Timestamp) as MaxTime
+        FROM OpcData
+        WHERE TagId IN ({','.join(['?'] * len(tag_ids))})
+        GROUP BY TagId
+    ) last
+    ON d.TagId = last.TagId AND d.Timestamp = last.MaxTime
+    """
+    params = tag_ids
+
+    # Можно добавить фильтр по server_id, если нужно
+    if req.server_id:
+        sql = f"""
+        SELECT d.TagId, d.Value, d.Timestamp, d.Status
+        FROM OpcData d
+        INNER JOIN OpcTags t ON d.TagId = t.Id
+        INNER JOIN (
+            SELECT TagId, MAX(Timestamp) as MaxTime
+            FROM OpcData
+            WHERE TagId IN ({','.join(['?'] * len(tag_ids))})
+            GROUP BY TagId
+        ) last ON d.TagId = last.TagId AND d.Timestamp = last.MaxTime
+        WHERE t.ServerId = ?
+        """
+        params = tag_ids + (req.server_id,)
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        values = {row[0]: {"value": row[1], "timestamp": str(row[2]), "status": row[3]} for row in cursor.fetchall()}
+    return {"ok": True, "values": values}
+
+# --- ПАГИНАЦИЯ + ФИЛЬТРЫ ---
+@router.get("/all")
+def get_all_tags(
+    page: int = Query(1, gt=0),
+    page_size: int = Query(100, le=500),
+    search: str = Query("", alias="search"),
+    server_id: Optional[int] = Query(None),
+):
+    tags = []
+    params = []
+    filters = ["t.Id IN (SELECT tag_id FROM PollingTaskTags)"]  # Только опрашиваемые теги
+    if server_id:
+        filters.append("t.ServerId=?")
+        params.append(server_id)
+    if search:
+        filters.append("(t.BrowseName LIKE ? OR t.NodeId LIKE ? OR t.Path LIKE ?)")
+        s = f"%{search}%"
+        params += [s, s, s]
+    where = "WHERE " + " AND ".join(filters) if filters else ""
+    query = f"""
+        SELECT t.Id, t.BrowseName, t.NodeId, t.DataType, t.Description, t.Path
+        FROM OpcTags t
+        {where}
+        ORDER BY t.Id OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+    """
+    params += [(page - 1) * page_size, page_size]
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            tags.append({
+                "id": row[0],
+                "browse_name": row[1],
+                "node_id": row[2],
+                "data_type": row[3],
+                "description": row[4],
+                "path": row[5],
+            })
+        # Get total count for pagination
+        count_query = f"SELECT COUNT(*) FROM OpcTags t {where}"
+        cursor.execute(count_query, params[:-2])
+        total = cursor.fetchone()[0]
+    return {"items": tags, "total": total}
+
+@router.put("/{tag_id}")
+def update_tag_desc(tag_id: int, data: TagDescUpdate):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE OpcTags SET Description=? WHERE Id=?", data.description, tag_id)
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Tag not found")
+        conn.commit()
+        # Вернём обновлённый тег для фронта
+        cursor.execute("SELECT Id, BrowseName, NodeId, DataType, Description, Path FROM OpcTags WHERE Id=?", tag_id)
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return {
+        "id": row[0],
+        "browse_name": row[1],
+        "node_id": row[2],
+        "data_type": row[3],
+        "description": row[4],
+        "path": row[5],
+    }
 
 @router.post("/add_tags")
 def add_tags(req: AddTagsRequest):
@@ -41,43 +175,18 @@ def add_tags(req: AddTagsRequest):
             if cursor.fetchone():
                 continue  # Уже есть такой тег, пропускаем
             cursor.execute(
-                """INSERT INTO OpcTags (ServerId, BrowseName, NodeId, DataType, Description)
-                OUTPUT INSERTED.Id VALUES (?, ?, ?, ?, ?)""",
+                """INSERT INTO OpcTags (ServerId, BrowseName, NodeId, DataType, Path, Description)
+                OUTPUT INSERTED.Id VALUES (?, ?, ?, ?, ?, ?)""",
                 req.server_id,
                 tag.browse_name,
                 tag.node_id,
                 tag.data_type,
+                tag.path if hasattr(tag, "path") else "",
                 tag.description or "",
             )
         conn.commit()
     return {"ok": True, "message": "Теги добавлены"}
 
-@router.post("/live")
-def get_live_values(req: LiveRequest):
-    async def read_all():
-        async with Client(req.endpoint_url, timeout=5) as client:
-            vals = {}
-            for node_id in req.node_ids:
-                try:
-                    node = client.get_node(node_id)
-                    val = await node.read_value()
-                    if isinstance(val, bytes):
-                        try:
-                            val = base64.b64encode(val).decode('ascii')
-                        except Exception:
-                            val = str(val)
-                    vals[node_id] = val
-                except:
-                    vals[node_id] = None
-            return vals
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        values = loop.run_until_complete(read_all())
-        return {"ok": True, "values": values}
-    except Exception as ex:
-        return {"ok": False, "error": str(ex)}
 
 @router.get("/", response_model=list[OpcTag])
 def list_tags(server_id: int = Query(..., description="ID OPC сервера")):
@@ -94,25 +203,6 @@ def list_tags(server_id: int = Query(..., description="ID OPC сервера")):
                 node_id=row[3], data_type=row[4]
             ))
     return tags
-
-@router.get("/all")
-def get_all_tags():
-    tags = []
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT Id, BrowseName, NodeId, DataType, Description
-            FROM OpcTags
-        """)
-        for row in cursor.fetchall():
-            tags.append({
-                "id": row[0],
-                "browse_name": row[1],
-                "node_id": row[2],
-                "data_type": row[3],
-                "description": row[4],
-            })
-    return {"items": tags}
 
 @router.put("/{tag_id}")
 def update_tag_desc(tag_id: int, data: TagDescUpdate):
@@ -179,6 +269,7 @@ def browse_tree(
     finally:
         loop.close()
 
+
 @router.get("/browse_full")
 def browse_full(
     endpoint_url: str = Query(...),
@@ -190,14 +281,13 @@ def browse_full(
 ):
     def safe_to_str(val):
         if isinstance(val, bytes):
-            try:
-                return val.decode("utf-8")
-            except UnicodeDecodeError:
+            for enc in ("utf-8", "cp1251", "latin1"):
                 try:
-                    return base64.b64encode(val).decode('ascii')
+                    return val.decode(enc)
                 except Exception:
-                    return str(val)
-        return val
+                    continue
+            return base64.b64encode(val).decode('ascii')
+        return str(val) if val is not None else ""
 
     async def do_browse():
         client = await get_configured_client(
@@ -212,25 +302,29 @@ def browse_full(
             node = client.get_node(node_id)
             refs = await node.get_children()
             for child in refs:
-                bname = await child.read_browse_name()
-                nodeclass = await child.read_node_class()
-                dtype = None
-                val = None
-                if nodeclass == ua.NodeClass.Variable:
-                    try:
-                        dtype = str(await child.read_data_type_as_variant_type())
-                        val = await child.read_value()
-                        val = safe_to_str(val)
-                    except Exception:
-                        pass
-                # Если хочешь еще и description брать — получай его из NodeAttributes/Description (опционально)
-                result.append({
-                    "browse_name": safe_to_str(bname.Name),
-                    "node_id": safe_to_str(child.nodeid.to_string()),
-                    "node_class": safe_to_str(str(nodeclass).replace("NodeClass.", "")),
-                    "data_type": safe_to_str(dtype),
-                    "value": val,
-                })
+                try:
+                    bname = safe_to_str((await child.read_browse_name()).Name)
+                    nodeclass = await child.read_node_class()
+                    node_class = safe_to_str(str(nodeclass).replace("NodeClass.", ""))
+                    dtype = ""
+                    val = None
+                    if nodeclass == ua.NodeClass.Variable:
+                        try:
+                            dtype = safe_to_str(str(await child.read_data_type_as_variant_type()))
+                            val = await child.read_value()
+                            val = safe_to_str(val)
+                        except Exception:
+                            pass
+                    result.append({
+                        "browse_name": bname,
+                        "node_id": safe_to_str(child.nodeid.to_string()),
+                        "node_class": node_class,
+                        "data_type": dtype,
+                        "value": val,
+                    })
+                except Exception as ex:
+                    print(f"Ошибка на {getattr(child, 'nodeid', '?')}: {ex}")
+                    continue
         return result
 
     loop = asyncio.new_event_loop()
@@ -242,3 +336,14 @@ def browse_full(
         return {"ok": False, "error": str(ex)}
     finally:
         loop.close()
+
+
+@router.delete("/{tag_id}")
+def delete_tag(tag_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM OpcTags WHERE Id=?", tag_id)
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Tag not found")
+        conn.commit()
+    return {"ok": True, "deleted": tag_id}

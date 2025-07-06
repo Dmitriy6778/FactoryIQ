@@ -694,3 +694,134 @@ async def browse_node_api(
         return {"ok": True, "children": result}
     except Exception as e:
         return {"ok": False, "message": f"Ошибка при browse: {str(e)}"}
+    
+@router.post("/scan_full_tree")
+async def scan_full_tree(
+    server_id: int = Body(...),
+    endpoint_url: str = Body(...),
+    opcUsername: str = Body(""),
+    opcPassword: str = Body(""),
+    securityPolicy: str = Body("Basic256Sha256"),
+    securityMode: str = Body("Sign"),
+):
+    """
+    Полностью рекурсивно обходит все дерево OPC UA, сохраняет карту тегов (все переменные) в базу OpcTags.
+    После этого фронт работает только с базой, а не с ПЛК!
+    """
+    import base64
+
+    def safe_to_str(val):
+        if isinstance(val, bytes):
+            for enc in ("utf-8", "cp1251", "latin1"):
+                try:
+                    return val.decode(enc)
+                except Exception:
+                    continue
+            return base64.b64encode(val).decode('ascii')
+        return str(val) if val is not None else ""
+
+
+    async def browse_all(client, node, parent_path=""):
+        result = []
+        try:
+            bname = safe_to_str((await node.read_browse_name()).Name)
+        except Exception:
+            bname = "<error>"
+        path = (parent_path + "/" + bname).strip("/") if parent_path else bname
+        children = await node.get_children()
+        print(f"[SCAN_TREE] Node: {path} | children: {len(children)}")
+        for child in children:
+            try:
+                nodeclass = await child.read_node_class()
+                bname = safe_to_str((await child.read_browse_name()).Name)
+                dtype = ""
+                if nodeclass == ua.NodeClass.Variable:
+                    try:
+                        dtype = safe_to_str(str(await child.read_data_type_as_variant_type()))
+                    except Exception:
+                        dtype = ""
+                    print(f"[SCAN_TREE]  VAR: {bname} {child.nodeid.to_string()} dtype={dtype} path={path}")
+                    result.append({
+                        "browse_name": bname,
+                        "node_id": safe_to_str(child.nodeid.to_string()),
+                        "data_type": dtype,
+                        "path": path
+                    })
+                elif nodeclass == ua.NodeClass.Object:
+                    try:
+                        object_type = await child.read_type_definition()
+                        print(f"[SCAN_TREE]  OBJ: {bname} {child.nodeid.to_string()} ObjectType={object_type.to_string()}")
+                    except Exception as ex:
+                        print(f"[SCAN_TREE]  OBJ: {bname} {child.nodeid.to_string()} [ObjectType не определен]: {ex}")
+                    result += await browse_all(client, child, path)
+                else:
+                    print(f"[SCAN_TREE]  SKIP: {bname} {child.nodeid.to_string()} class={nodeclass}")
+            except Exception as ex:
+                print(f"[SCAN_TREE] Ошибка на {getattr(child, 'nodeid', '?')}: {ex}")
+                continue
+        return result
+
+
+    # Основная логика
+    try:
+        print("[SCAN_TREE] === СТАРТ ===")
+        print(f"[SCAN_TREE] server_id: {server_id}, endpoint_url: {endpoint_url}")
+        print(f"[SCAN_TREE] securityPolicy: {securityPolicy}, securityMode: {securityMode}")
+        print(f"[SCAN_TREE] opcUsername: {opcUsername}, opcPassword: {'***' if opcPassword else ''}")
+
+        client = await get_configured_client(
+            endpoint_url,
+            username=opcUsername or None,
+            password=opcPassword or None,
+            security_policy=securityPolicy,
+            security_mode=securityMode,
+        )
+        async with client:
+            root = client.get_node("i=85")
+            tags = await browse_all(client, root)
+
+        print(f"[SCAN_TREE] === ОБХОД ЗАВЕРШЕН ===")
+        print(f"[SCAN_TREE] Всего найдено: {len(tags)}")
+        for t in tags[:10]:
+            print("[SCAN_TREE] Первый тег:", t)
+
+        # --- Сохраняем всё в базу ---
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT NodeId FROM OpcTags WHERE ServerId=?", server_id)
+            existing_nodeids = set(row[0] for row in cursor.fetchall())
+            inserted = 0
+            for tag in tags:
+                node_id = tag.get("node_id", "")
+                if node_id in existing_nodeids:
+                    continue
+                try:
+                    cursor.execute(
+                        """INSERT INTO OpcTags (ServerId, BrowseName, NodeId, DataType, Path, Description)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        server_id,
+                        tag.get("browse_name", ""),
+                        node_id,
+                        tag.get("data_type", ""),
+                        tag.get("path", ""),
+                        ""
+                    )
+                    inserted += 1
+                except Exception as ex:
+                    print(f"[SCAN_TREE] Ошибка при вставке: {ex}")
+            conn.commit()
+
+        print(f"[SCAN_TREE] === СОХРАНЕНО В БАЗУ: {inserted} ===")
+        return {
+            "ok": True,
+            "found": len(tags),
+            "inserted": inserted,
+            "debug_first_tags": tags[:5],
+            "debug_server_id": server_id
+        }
+    except Exception as ex:
+        import traceback
+        tb = traceback.format_exc()
+        print("[SCAN_TREE] ГЛОБАЛЬНАЯ ОШИБКА:", tb)
+        return {"ok": False, "error": str(ex), "trace": tb}

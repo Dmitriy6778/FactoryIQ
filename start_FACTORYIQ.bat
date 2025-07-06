@@ -1,6 +1,6 @@
 @echo off
 REM Перейти в папку backend (корень проекта)
-cd E:\My_Business\AltaiMai\FactoryIQ\backend
+cd D:\My_Business\AltaiMai\FactoryIQ\backend
 
 REM --- АКТИВАЦИЯ PYTHON ОКРУЖЕНИЯ ---
 call venv\Scripts\activate.bat

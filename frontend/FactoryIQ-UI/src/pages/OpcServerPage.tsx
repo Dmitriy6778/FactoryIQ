@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import styles from "../styles/OpcServerPage.module.css";
 import {
   Server,
@@ -9,8 +9,6 @@ import {
   Search,
 } from "lucide-react";
 import BackButton from "../components/BackButton";
-
-import "antd/dist/reset.css"; // AntD v5
 import { Tree } from "antd";
 
 type TreeNode = {
@@ -70,16 +68,17 @@ const OpcServerPage: React.FC = () => {
   const [intervals, setIntervals] = useState<{ id: number; name: string; intervalSeconds: number }[]>([]);
   const [selectedIntervalId, setSelectedIntervalId] = useState<number>(1);
   const [recording, setRecording] = useState(false);
-  const [recordingTags, setRecordingTags] = useState<string[]>([]);
-  const timerRef = useRef<any>(null);
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
+  const [isScanningFullTree, setIsScanningFullTree] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
 
   // --- Tree загрузка/подгрузка ---
   useEffect(() => {
     if (selectedServer) loadChildren("i=85", null);
     else setTreeData([]);
-    setCheckedKeys([]); // сброс выбора
+    setCheckedKeys([]);
     setSelectedTag(null);
-    // eslint-disable-next-line
+    setSelectedNodeKey(null);
   }, [selectedServer]);
 
   const loadChildren = async (nodeId: string, parentKey: string | null) => {
@@ -100,14 +99,39 @@ const OpcServerPage: React.FC = () => {
       isLeaf: String(tag.node_class).toLowerCase() === "variable" || String(tag.node_class) === "2",
       data: tag,
     }));
-    
-
-    if (!parentKey) {
-      setTreeData(nodes);
-    } else {
-      setTreeData((origin) => updateNodeChildren(origin, parentKey, nodes));
-    }
+    if (!parentKey) setTreeData(nodes);
+    else setTreeData((origin) => updateNodeChildren(origin, parentKey, nodes));
   };
+
+  const handleScanFullTree = async (srv: OpcServer) => {
+    if (!window.confirm("Создать полную карту тегов для этого сервера? Это может занять несколько минут.")) return;
+    setIsScanningFullTree(true);   // включаем лоадер!
+    try {
+      const res = await fetch("http://localhost:8000/servers/scan_full_tree", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          server_id: srv.id,
+          endpoint_url: srv.endpoint_url,
+          opcUsername: srv.opcUsername || "",
+          opcPassword: srv.opcPassword || "",
+          securityPolicy: srv.securityPolicy || "Basic256Sha256",
+          securityMode: srv.securityMode || "Sign",
+        }),
+      });
+      const data = await res.json();
+      console.log("[FRONT] Ответ на карту тегов:", data);
+      alert(
+        `Готово! Найдено ${data.count}, сохранено ${data.inserted} тегов.\n\nПервые теги:\n` +
+        JSON.stringify(data.debug_first_tags || [], null, 2)
+      );
+    } catch (err) {
+      alert("Ошибка соединения: " + err);
+    }
+    setIsScanningFullTree(false);  // отключаем лоадер!
+  };
+
+
 
   function updateNodeChildren(nodes: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
     return nodes.map((node) => {
@@ -117,8 +141,31 @@ const OpcServerPage: React.FC = () => {
     });
   }
 
-  const onLoadData = ({ key, children }: any) =>
-    children ? Promise.resolve() : loadChildren(key, key);
+  // Собирает все leaf-узлы под выбранным key
+  const collectLeafTagsByKey = (nodes: TreeNode[], key: string): OpcTag[] => {
+    let result: OpcTag[] = [];
+    const visit = (node: TreeNode) => {
+      if (node.key === key) {
+        collectAllLeafs(node, result);
+        return true;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          if (visit(child)) return true;
+        }
+      }
+      return false;
+    };
+    for (const node of nodes) {
+      if (visit(node)) break;
+    }
+    return result;
+  };
+
+  const collectAllLeafs = (node: TreeNode, result: OpcTag[]) => {
+    if (node.isLeaf && node.data) result.push(node.data);
+    if (node.children) node.children.forEach(child => collectAllLeafs(child, result));
+  };
 
   // --- Получение справочников, серверов и т.д. ---
   useEffect(() => {
@@ -143,20 +190,17 @@ const OpcServerPage: React.FC = () => {
         }));
       });
   }, []);
-
   useEffect(() => {
     fetch("http://localhost:8000/polling/polling-intervals")
       .then((res) => res.json())
       .then((data) => setIntervals(data.items || []));
   }, []);
-
-  useEffect(() => {
-    fetchServers();
-  }, []);
+  useEffect(() => { fetchServers(); }, []);
   const fetchServers = async () => {
     const res = await fetch("http://localhost:8000/servers/servers");
     setServers(await res.json());
   };
+
   // --- Функции работы с серверами (добавление/удаление/изменение) ---
   const checkServer = async () => {
     const queryParams = new URLSearchParams({
@@ -166,7 +210,6 @@ const OpcServerPage: React.FC = () => {
       securityPolicy: newServer.securityPolicy || DEFAULT_POLICIES[0],
       securityMode: newServer.securityMode || DEFAULT_MODES[0],
     }).toString();
-
     setProbeResult("Проверка...");
     const res = await fetch(
       `http://localhost:8000/servers/probe?${queryParams}`
@@ -246,11 +289,16 @@ const OpcServerPage: React.FC = () => {
       eventSource.close();
     };
   };
-  const getLeafKeys = (nodes, checkedKeys) => {
-    let result = [];
+
+  const handleBrowse = (url: string) => {
+    setNewServer((s) => ({ ...s, endpoint_url: url }));
+  };
+
+  const getLeafKeys = (nodes: TreeNode[], checkedKeys: React.Key[]): string[] => {
+    let result: string[] = [];
     nodes.forEach((node) => {
       if (node.isLeaf && checkedKeys.includes(node.key)) {
-        result.push(node.key);
+        result.push(node.key as string);
       }
       if (node.children) {
         result = result.concat(getLeafKeys(node.children, checkedKeys));
@@ -258,7 +306,8 @@ const OpcServerPage: React.FC = () => {
     });
     return result;
   };
-  
+
+  // --- Кнопка "Запустить опрос" выбранных тегов
   const handleStartSelectedPolling = async () => {
     if (!selectedServer) {
       alert("Сначала выберите сервер!");
@@ -268,52 +317,21 @@ const OpcServerPage: React.FC = () => {
       alert("Выберите хотя бы один тег (чекбокс) для опроса.");
       return;
     }
-  
-    // Логи для отладки
-    console.log("checkedKeys:", checkedKeys);
-  
-    // Получаем только leaf-узлы (конечные переменные)
     const leafKeys = getLeafKeys(treeData, checkedKeys);
-    console.log("leafKeys (конечные теги):", leafKeys);
-  
-    // Найти все чекнутые ноды для визуальной проверки их структуры
-    const allCheckedNodes = [];
-    const collectNodes = (nodes) => {
+    let selectedTags: OpcTag[] = [];
+    const gatherTags = (nodes: TreeNode[]) => {
       nodes.forEach((node) => {
-        if (checkedKeys.includes(node.key)) {
-          allCheckedNodes.push(node);
-        }
-        if (node.children) collectNodes(node.children);
-      });
-    };
-    collectNodes(treeData);
-    console.log("allCheckedNodes:", allCheckedNodes);
-    console.log(
-      "isLeaf flags (key, isLeaf, node_class):",
-      allCheckedNodes.map((n) => [n.key, n.isLeaf, n.data?.node_class])
-    );
-  
-    // Собираем только те теги, которые соответствуют leafKeys
-    const selectedTags = [];
-    const gatherTags = (nodes) => {
-      nodes.forEach((node) => {
-        if (leafKeys.includes(node.key) && node.data && node.isLeaf) {
+        if (leafKeys.includes(node.key as string) && node.data && node.isLeaf) {
           selectedTags.push(node.data);
         }
         if (node.children) gatherTags(node.children);
       });
     };
     gatherTags(treeData);
-  
-    console.log("selectedTags (итог):", selectedTags);
-  
     if (!selectedTags.length) {
-      alert(
-        "Выберите хотя бы один тег Variable для опроса (чекбокс должен стоять на переменных, а не на папках)!"
-      );
+      alert("Выберите хотя бы один тег Variable для опроса (чекбокс должен стоять на переменных, а не на папках)!");
       return;
     }
-  
     try {
       const res = await fetch(
         "http://localhost:8000/polling/start_selected_polling",
@@ -337,7 +355,6 @@ const OpcServerPage: React.FC = () => {
       if (data.ok) {
         alert(`Опрос выбранных тегов запущен (task_id=${data.task_id})`);
         setRecording(true);
-        setRecordingTags(selectedTags.map((t) => t.node_id));
       } else {
         alert("Ошибка запуска: " + (data.message || "Неизвестная ошибка"));
       }
@@ -345,12 +362,66 @@ const OpcServerPage: React.FC = () => {
       alert("Ошибка соединения: " + err);
     }
   };
-  
-  
+
+  // --- Опрос всей ветки (использует collectLeafTagsByKey) ---
+  const handleStartPollingForBranch = async () => {
+    if (!selectedServer) {
+      alert("Сначала выберите сервер!");
+      return;
+    }
+    if (!selectedNodeKey) {
+      alert("Выделите узел (папку или любой объект в дереве) для опроса всей ветки");
+      return;
+    }
+    const tagsInBranch = collectLeafTagsByKey(treeData, selectedNodeKey);
+    if (!tagsInBranch.length) {
+      alert("В этой ветке не найдено ни одной переменной (Variable)");
+      return;
+    }
+    try {
+      const res = await fetch(
+        "http://localhost:8000/polling/start_selected_polling",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            server_id: selectedServer.id,
+            endpoint_url: selectedServer.endpoint_url,
+            tags: tagsInBranch.map((t) => ({
+              node_id: t.node_id,
+              browse_name: t.browse_name,
+              data_type: t.data_type || "",
+              description: t.description || "",
+            })),
+            interval_id: selectedIntervalId,
+          }),
+        }
+      );
+      const data = await res.json();
+      if (data.ok) {
+        alert(`Опрос всей ветки запущен (task_id=${data.task_id})`);
+        setRecording(true);
+      } else {
+        alert("Ошибка запуска: " + (data.message || "Неизвестная ошибка"));
+      }
+    } catch (err) {
+      alert("Ошибка соединения: " + err);
+    }
+  };
+
+  const onLoadData = ({ key, children }: any) =>
+    children ? Promise.resolve() : loadChildren(key, key);
+
 
   // --- Основной return ---
   return (
     <div className={styles.startPage}>
+      {isScanningFullTree && (
+        <div className={styles.loadingOverlay}>
+          <div className={styles.loader}></div>
+          <div>Идёт построение карты тегов...</div>
+        </div>
+      )}
       <div className={styles.centerWrapper}>
         <div className={styles.card}>
           <BackButton />
@@ -366,7 +437,187 @@ const OpcServerPage: React.FC = () => {
             OPC UA Серверы
           </h1>
 
-          {/* Список серверов */}
+          {/* --- СВОРРАЧИВАЕМАЯ СЕКЦИЯ: Поиск/добавление OPC UA серверов --- */}
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 19,
+                userSelect: "none",
+                marginBottom: showAddPanel ? 10 : 0,
+                display: "flex",
+                alignItems: "center"
+              }}
+              onClick={() => setShowAddPanel((v) => !v)}
+            >
+              {showAddPanel ? "▼" : "►"} Поиск/добавление OPC UA серверов
+            </div>
+            {showAddPanel && (
+              <>
+                <div className={styles.sectionTitle}>
+                  <CloudCog size={20} style={{ marginRight: 6, color: "#35e6ff" }} />
+                  Поиск OPC UA серверов в сети
+                </div>
+                <div className={styles.scanPanel}>
+                  <input
+                    className={styles.input}
+                    value={ipStart}
+                    onChange={(e) => setIpStart(e.target.value)}
+                    placeholder="Начальный IP"
+                  />
+                  <input
+                    className={styles.input}
+                    value={ipEnd}
+                    onChange={(e) => setIpEnd(e.target.value)}
+                    placeholder="Конечный IP"
+                  />
+                  <button
+                    className={styles.button}
+                    onClick={startScan}
+                    disabled={isScanning}
+                  >
+                    {isScanning ? "Поиск..." : "Искать"}
+                  </button>
+                </div>
+                <div className={styles.logPanel}>
+                  {scanLog.map((line, i) => (
+                    <div key={i}>{line}</div>
+                  ))}
+                </div>
+                {foundServers.length > 0 && (
+                  <div className={styles.foundBlock}>
+                    <div className={styles.sectionTitleMini}>Найдено:</div>
+                    <ul>
+                      {foundServers.map((url) => (
+                        <li key={url}>
+                          <b>{url}</b>
+                          <button
+                            onClick={() => handleBrowse(url)}
+                            className={styles.smallBtn}
+                          >
+                            Обзор
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {/* Добавление сервера */}
+                <div
+                  className={styles.addServerBlock}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    maxWidth: 320,
+                  }}
+                >
+                  <input
+                    className={styles.input}
+                    placeholder="Название"
+                    value={newServer.name}
+                    onChange={(e) =>
+                      setNewServer((s) => ({ ...s, name: e.target.value }))
+                    }
+                  />
+                  <input
+                    className={styles.input}
+                    placeholder="opc.tcp://..."
+                    value={newServer.endpoint_url}
+                    onChange={(e) =>
+                      setNewServer((s) => ({
+                        ...s,
+                        endpoint_url: e.target.value,
+                      }))
+                    }
+                  />
+                  <input
+                    className={styles.input}
+                    placeholder="Логин OPC UA"
+                    value={newServer.opcUsername}
+                    onChange={(e) =>
+                      setNewServer((s) => ({
+                        ...s,
+                        opcUsername: e.target.value,
+                      }))
+                    }
+                  />
+                  <input
+                    className={styles.input}
+                    type="password"
+                    placeholder="Пароль OPC UA"
+                    value={newServer.opcPassword}
+                    onChange={(e) =>
+                      setNewServer((s) => ({
+                        ...s,
+                        opcPassword: e.target.value,
+                      }))
+                    }
+                  />
+                  <select
+                    className={styles.input}
+                    value={newServer.securityPolicy}
+                    onChange={(e) =>
+                      setNewServer((s) => ({
+                        ...s,
+                        securityPolicy: e.target.value,
+                      }))
+                    }
+                  >
+                    {securityPolicies.length === 0 ? (
+                      <option>Нет доступных политик</option>
+                    ) : (
+                      securityPolicies.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <select
+                    className={styles.input}
+                    value={newServer.securityMode}
+                    onChange={(e) =>
+                      setNewServer((s) => ({
+                        ...s,
+                        securityMode: e.target.value,
+                      }))
+                    }
+                  >
+                    {securityModes.length === 0 ? (
+                      <option>Нет доступных режимов</option>
+                    ) : (
+                      securityModes.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className={styles.iconBtn}
+                      title="Проверить доступность"
+                      onClick={checkServer}
+                    >
+                      <RefreshCw size={20} />
+                    </button>
+                    <button
+                      className={styles.iconBtn}
+                      title="Добавить сервер"
+                      onClick={handleAddServer}
+                    >
+                      <Plus size={22} />
+                    </button>
+                  </div>
+                </div>
+                {probeResult && <div className={styles.status}>{probeResult}</div>}
+              </>
+            )}
+          </div>
+
+          {/* --- ТАБЛИЦА добавленных OPC UA серверов --- */}
           <div className={styles.sectionTitle} style={{ marginTop: 26 }}>
             Добавленные OPC UA серверы
           </div>
@@ -438,6 +689,14 @@ const OpcServerPage: React.FC = () => {
                       </button>
                       <button
                         className={styles.smallBtn}
+                        style={{ color: "#1be4aa" }}
+                        onClick={() => handleScanFullTree(srv)}
+                        title="Создать карту тегов"
+                      >
+                        🗺️
+                      </button>
+                      <button
+                        className={styles.smallBtn}
                         onClick={() => setSelectedServer(srv)}
                       >
                         <Search size={16} /> Обзор
@@ -448,153 +707,8 @@ const OpcServerPage: React.FC = () => {
               )}
             </tbody>
           </table>
-          {/* Сканирование сети */}
-          <div className={styles.sectionTitle}>
-            <CloudCog size={20} style={{ marginRight: 6, color: "#35e6ff" }} />
-            Поиск OPC UA серверов в сети
-          </div>
-          <div className={styles.scanPanel}>
-            <input
-              className={styles.input}
-              value={ipStart}
-              onChange={(e) => setIpStart(e.target.value)}
-              placeholder="Начальный IP"
-            />
-            <input
-              className={styles.input}
-              value={ipEnd}
-              onChange={(e) => setIpEnd(e.target.value)}
-              placeholder="Конечный IP"
-            />
-            <button
-              className={styles.button}
-              onClick={startScan}
-              disabled={isScanning}
-            >
-              {isScanning ? "Поиск..." : "Искать"}
-            </button>
-          </div>
-          <div className={styles.logPanel}>
-            {scanLog.map((line, i) => (
-              <div key={i}>{line}</div>
-            ))}
-          </div>
-          {foundServers.length > 0 && (
-            <div className={styles.foundBlock}>
-              <div className={styles.sectionTitleMini}>Найдено:</div>
-              <ul>
-                {foundServers.map((url) => (
-                  <li key={url}>
-                    <b>{url}</b>
-                    <button
-                      onClick={() => handleBrowse(url)}
-                      className={styles.smallBtn}
-                    >
-                      Обзор
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
-          {/* Добавление сервера */}
-          <div
-            className={styles.addServerBlock}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "10px",
-              maxWidth: 320,
-            }}
-          >
-            <input
-              className={styles.input}
-              placeholder="Название"
-              value={newServer.name}
-              onChange={(e) =>
-                setNewServer((s) => ({ ...s, name: e.target.value }))
-              }
-            />
-            <input
-              className={styles.input}
-              placeholder="opc.tcp://..."
-              value={newServer.endpoint_url}
-              onChange={(e) =>
-                setNewServer((s) => ({ ...s, endpoint_url: e.target.value }))
-              }
-            />
-            <input
-              className={styles.input}
-              placeholder="Логин OPC UA"
-              value={newServer.opcUsername}
-              onChange={(e) =>
-                setNewServer((s) => ({ ...s, opcUsername: e.target.value }))
-              }
-            />
-            <input
-              className={styles.input}
-              type="password"
-              placeholder="Пароль OPC UA"
-              value={newServer.opcPassword}
-              onChange={(e) =>
-                setNewServer((s) => ({ ...s, opcPassword: e.target.value }))
-              }
-            />
-            <select
-              className={styles.input}
-              value={newServer.securityPolicy}
-              onChange={(e) =>
-                setNewServer((s) => ({ ...s, securityPolicy: e.target.value }))
-              }
-            >
-              {securityPolicies.length === 0 ? (
-                <option>Нет доступных политик</option>
-              ) : (
-                securityPolicies.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))
-              )}
-            </select>
-            <select
-              className={styles.input}
-              value={newServer.securityMode}
-              onChange={(e) =>
-                setNewServer((s) => ({ ...s, securityMode: e.target.value }))
-              }
-            >
-              {securityModes.length === 0 ? (
-                <option>Нет доступных режимов</option>
-              ) : (
-                securityModes.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))
-              )}
-            </select>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                className={styles.iconBtn}
-                title="Проверить доступность"
-                onClick={checkServer}
-              >
-                <RefreshCw size={20} />
-              </button>
-              <button
-                className={styles.iconBtn}
-                title="Добавить сервер"
-                onClick={handleAddServer}
-              >
-                <Plus size={22} />
-              </button>
-            </div>
-          </div>
-          {probeResult && <div className={styles.status}>{probeResult}</div>}
-
-          {/* === АНТD TREE BROWSE OPC UA === */}
+          {/* --- Остальной функционал (браузер тегов, кнопки) --- */}
           {selectedServer && (
             <div>
               <div className={styles.sectionTitle}>
@@ -612,22 +726,27 @@ const OpcServerPage: React.FC = () => {
                   border: "1px solid #eee",
                   marginTop: 20,
                   maxHeight: 600,
+                  height: 600,
                   overflow: "auto",
                 }}
               >
-               <Tree
+                <Tree
                   treeData={treeData}
                   loadData={onLoadData}
                   showLine
                   checkable
                   selectable
                   checkStrictly={true}
-                  onSelect={(selectedKeys, info: any) => {
+                  height={550}
+                  virtual
+                  onSelect={(_, info) => {
+                    setSelectedNodeKey(info.node.key);
                     if (info.node && info.node.data) setSelectedTag(info.node.data);
                   }}
                   onCheck={(checked, info) => {
-                    // Для checkStrictly анtd возвращает объект {checked, halfChecked}
                     setCheckedKeys(Array.isArray(checked) ? checked : checked.checked);
+                    if (info.node && info.node.key) setSelectedNodeKey(info.node.key);
+                    if (info.node && info.node.data) setSelectedTag(info.node.data);
                   }}
                   checkedKeys={checkedKeys}
                   defaultExpandAll={false}
@@ -654,8 +773,7 @@ const OpcServerPage: React.FC = () => {
                       <b>DataType:</b> {selectedTag.data_type}
                     </div>
                     <div>
-                      <b>Value:</b>{" "}
-                      {selectedTag.value ? String(selectedTag.value) : "–"}
+                      <b>Value:</b> {selectedTag.value ? String(selectedTag.value) : "–"}
                     </div>
                   </div>
                 )}
@@ -669,9 +787,7 @@ const OpcServerPage: React.FC = () => {
                   className={styles.input}
                   style={{ width: 150, marginRight: 8 }}
                   value={selectedIntervalId}
-                  onChange={(e) =>
-                    setSelectedIntervalId(Number(e.target.value))
-                  }
+                  onChange={(e) => setSelectedIntervalId(Number(e.target.value))}
                   title="Интервал опроса"
                 >
                   {intervals.map((i) => (
@@ -682,6 +798,12 @@ const OpcServerPage: React.FC = () => {
                 </select>
                 <button onClick={handleStartSelectedPolling}>
                   Запустить опрос
+                </button>
+                <button
+                  onClick={() => handleStartPollingForBranch()}
+                  disabled={!selectedTag}
+                >
+                  Опросить всю ветку
                 </button>
                 {recording && (
                   <span style={{ color: "green", marginLeft: 10 }}>
@@ -712,6 +834,7 @@ const OpcServerPage: React.FC = () => {
       </div>
     </div>
   );
+
 };
 
 export default OpcServerPage;

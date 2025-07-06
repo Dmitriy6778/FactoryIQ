@@ -1,5 +1,5 @@
 @echo off
-cd E:\My_Business\AltaiMai\FactoryIQ\backend
+cd D:\My_Business\AltaiMai\FactoryIQ\backend
 call venv\Scripts\activate.bat
 
 set FERNET_KEY=Z3Vls19NlJWSwECAQF7vxEBStOvACn97aPS9fjPileQ=

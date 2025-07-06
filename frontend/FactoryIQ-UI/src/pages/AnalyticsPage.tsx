@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import styles from "../styles/AnalyticsPage.module.css";
-import { ArrowLeft, BarChart2, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { BarChart2 } from "lucide-react";
 import Charts from "../components/Charts";
+import TagChipList from "../components/TagChipList"; // или путь до компонента
+import BackButton from "../components/BackButton"; // Компонент кнопки "Назад"
 
 // Типы
 type Tag = {
@@ -54,7 +55,7 @@ function getRandomColorHex() {
 }
 
 const AnalyticsPage: React.FC = () => {
-    const navigate = useNavigate();
+
     const [tags, setTags] = useState<Tag[]>([]);
     const [tagFilter, setTagFilter] = useState("");
     const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
@@ -89,7 +90,10 @@ const AnalyticsPage: React.FC = () => {
     useEffect(() => {
         fetch("http://localhost:8000/tags/all")
             .then(res => res.json())
-            .then(res => setTags(res.items || []));
+            .then(res => {
+                console.log("TAGS:", res.items?.slice(0, 5)); // Посмотри, есть ли description
+                setTags(res.items || []);
+            });
     }, []);
 
     useEffect(() => {
@@ -243,18 +247,18 @@ const AnalyticsPage: React.FC = () => {
     }, [seriesColors, chartType]);
 
 
-       return (
+
+
+    return (
         <div className={styles.page}>
             <div className={styles.header}>
-                <button className={styles.backBtn} onClick={() => navigate("/")}>
-                    <ArrowLeft size={24} />
-                </button>
+                <BackButton />
                 <BarChart2 size={34} style={{ marginRight: 10, color: "#00ffc6" }} />
                 <span>Аналитика — Тренды по тегам</span>
             </div>
 
             <div className={styles.controls} style={{ flexWrap: "wrap" }}>
-                {/* Поле поиска тега */}
+                {/* Поиск тега */}
                 <div style={{ width: "50%", minWidth: 350, marginBottom: 10, position: "relative" }}>
                     <input
                         ref={inputRef}
@@ -299,43 +303,50 @@ const AnalyticsPage: React.FC = () => {
                                         borderBottom: "1px solid #eee",
                                         background: "#fff",
                                         display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "space-between",
-                                        gap: 8,
+                                        flexDirection: "column",
+                                        alignItems: "flex-start",
+                                        gap: 2,
                                     }}
                                     onMouseDown={e => {
                                         e.preventDefault();
                                         handleTagSelect(tag);
                                     }}
                                 >
-                                    <span style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    <span
+                                        style={{
+                                            fontWeight: 600,
+                                            color: "#153",
+                                            fontSize: 15,
+                                            whiteSpace: "nowrap",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis"
+                                        }}
+                                    >
                                         {tag.browse_name || tag.name || tag.TagName}
                                     </span>
-                                    {tag.description && (
-                                        <span
-                                            style={{
-                                                fontSize: 12,
-                                                color: "#888",
-                                                marginLeft: 10,
-                                                textAlign: "right",
-                                                whiteSpace: "nowrap",
-                                                overflow: "hidden",
-                                                textOverflow: "ellipsis",
-                                                flexShrink: 1,
-                                                maxWidth: 220,
-                                            }}
-                                            title={tag.description}
-                                        >
-                                            {tag.description}
-                                        </span>
-                                    )}
+                                    <span
+                                        style={{
+                                            fontSize: 12,
+                                            color: "#888",
+                                            marginTop: 2,
+                                            maxWidth: "100%",
+                                            whiteSpace: "nowrap",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis"
+                                        }}
+                                        title={tag.description || ""}
+                                    >
+                                        {tag.description || <i>— нет описания —</i>}
+                                    </span>
+
                                 </div>
                             ))}
+
                         </div>
                     )}
                 </div>
 
-                {/* Блок выбранных тегов */}
+                {/* Выбранные теги и кнопка рандома */}
                 <div
                     style={{
                         width: "100%",
@@ -348,94 +359,39 @@ const AnalyticsPage: React.FC = () => {
                         display: "flex",
                         flexWrap: "wrap",
                         gap: 6,
-                        alignItems: "center",
+                        alignItems: "flex-start",
                     }}
                 >
-                    {selectedTags.length === 0 && (
-                        <div style={{ color: "#bbb" }}>Теги не выбраны</div>
-                    )}
-                    {selectedTags.map((tag, i) => (
-                        <div
-                            key={tag.id}
-                            style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                background: "#00ffc655",
-                                color: "#005",
-                                padding: "4px 8px",
-                                borderRadius: 4,
-                                userSelect: "none",
-                                marginRight: 8
-                            }}
-                        >
-                            {/* Для shift_delta — две серии на тег, поэтому цвет для двух */}
-                            {analyticType === "shift_delta" ? (
-                                <>
-                                    <input
-                                        type="color"
-                                        value={seriesColors[i * 2] || defaultColors[0]}
-                                        onChange={e => setSeriesColors(arr => {
-                                            const newArr = [...arr];
-                                            newArr[i * 2] = e.target.value;
-                                            return newArr;
-                                        })}
-                                        style={{ width: 22, height: 22, marginRight: 2, border: "none", background: "none" }}
-                                    />
-                                    <input
-                                        type="color"
-                                        value={seriesColors[i * 2 + 1] || defaultColors[1]}
-                                        onChange={e => setSeriesColors(arr => {
-                                            const newArr = [...arr];
-                                            newArr[i * 2 + 1] = e.target.value;
-                                            return newArr;
-                                        })}
-                                        style={{ width: 22, height: 22, marginRight: 6, border: "none", background: "none" }}
-                                    />
-                                </>
-                            ) : (
-                                <input
-                                    type="color"
-                                    value={seriesColors[i] || defaultColors[i % defaultColors.length]}
-                                    onChange={e => setSeriesColors(arr => {
-                                        const newArr = [...arr];
-                                        newArr[i] = e.target.value;
-                                        return newArr;
-                                    })}
-                                    style={{ width: 22, height: 22, marginRight: 6, border: "none", background: "none" }}
-                                />
-                            )}
-                            {tag.browse_name || tag.name || tag.TagName}
-                            <X
-                                size={16}
-                                style={{ marginLeft: 6, cursor: "pointer" }}
-                                onClick={() => removeTag(tag.id)}
-                            />
-                        </div>
-                    ))}
+                    <TagChipList
+                        tags={selectedTags}
+                        seriesColors={seriesColors}
+                        analyticType={analyticType}
+                        defaultColors={defaultColors}
+                        setSeriesColors={setSeriesColors}
+                        removeTag={removeTag}
+                    />
+                    <button
+                        onClick={handleRandomColors}
+                        style={{
+                            margin: "4px 0 0 12px",
+                            padding: "4px 16px",
+                            border: "none",
+                            borderRadius: 5,
+                            background: "#1fc8db",
+                            color: "#fff",
+                            fontWeight: 600,
+                            fontSize: 16,
+                            cursor: "pointer",
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
+                            transition: "background 0.2s"
+                        }}
+                    >
+                        🎲 Рандом цвета
+                    </button>
                 </div>
 
-                {/* КНОПКА РАНДОМ */}
-                <button
-                    onClick={handleRandomColors}
-                    style={{
-                        margin: "10px 0 0 0",
-                        padding: "4px 16px",
-                        border: "none",
-                        borderRadius: 5,
-                        background: "#1fc8db",
-                        color: "#fff",
-                        fontWeight: 600,
-                        fontSize: 16,
-                        cursor: "pointer",
-                        boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
-                        transition: "background 0.2s"
-                    }}
-                >
-                    🎲 Рандом цвета
-                </button>
-
                 {/* Остальные элементы управления */}
-                <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                     <input
                         className={styles.input}
                         type="date"
@@ -484,7 +440,7 @@ const AnalyticsPage: React.FC = () => {
                     </select>
                 </div>
 
-                {/* Бары — настройки только для bar chart */}
+                {/* Бары — только для bar chart */}
                 {chartType === "bar" && (
                     <div style={{
                         display: "flex",
@@ -531,6 +487,7 @@ const AnalyticsPage: React.FC = () => {
                     </div>
                 )}
 
+                {/* Чекбоксы и кнопка "Построить график" */}
                 <div style={{ marginTop: 16 }}>
                     <label className={styles.checkboxLabel}>
                         <input
@@ -577,6 +534,8 @@ const AnalyticsPage: React.FC = () => {
                     {loading ? "Загрузка..." : "Построить график"}
                 </button>
             </div>
+
+            {/* График */}
             <div className={styles.chartBlock}>
                 <Charts
                     data={data}
@@ -604,6 +563,7 @@ const AnalyticsPage: React.FC = () => {
             <div style={{ height: 20 }} />
         </div>
     );
+
 
 };
 

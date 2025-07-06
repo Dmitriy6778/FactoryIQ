@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import styles from "../styles/CreateReportPage.module.css";
-
+import BackButton from "../components/BackButton";
 // Типы тегов
 type Tag = {
   id: number;
@@ -387,11 +387,11 @@ const CreateReportPage: React.FC = () => {
       dataRows = reportTableRows.map((row) => [
         formatDateTimeCustom(
           row.TimeGroup ||
-            row.Date ||
-            row.Timestamp ||
-            row.dt ||
-            row.datetime ||
-            ""
+          row.Date ||
+          row.Timestamp ||
+          row.dt ||
+          row.datetime ||
+          ""
         ),
         ...selectedTags.map((tag) => {
           const key = `Value_${tag.tag.id}`;
@@ -487,6 +487,7 @@ const CreateReportPage: React.FC = () => {
     <div className={styles.pageContainer}>
       {/* Список шаблонов */}
       <div className={styles.reportCard}>
+        <BackButton />
         <div className={styles.reportTitle}>Список шаблонов</div>
         <table className={styles.reportWideTable}>
           <thead>
@@ -788,10 +789,9 @@ const CreateReportPage: React.FC = () => {
                       <th key={i}>
                         {t.tag.description || t.tag.browse_name || t.tag.name}
                         {aggregate
-                          ? `, ${
-                              AGGREGATE_OPTIONS.find((a) => a.key === aggregate)
-                                ?.label
-                            }`
+                          ? `, ${AGGREGATE_OPTIONS.find((a) => a.key === aggregate)
+                            ?.label
+                          }`
                           : ""}
                         {interval ? `, ${interval} мин` : ""}
                       </th>
@@ -804,19 +804,19 @@ const CreateReportPage: React.FC = () => {
                       <td>
                         {reportType === "custom"
                           ? formatDateTimeCustom(
-                              row.TimeGroup ||
-                                row.Date ||
-                                row.Timestamp ||
-                                row.dt ||
-                                row.datetime ||
-                                ""
-                            )
-                          : row.Date ||
                             row.TimeGroup ||
+                            row.Date ||
                             row.Timestamp ||
                             row.dt ||
                             row.datetime ||
-                            "-"}
+                            ""
+                          )
+                          : row.Date ||
+                          row.TimeGroup ||
+                          row.Timestamp ||
+                          row.dt ||
+                          row.datetime ||
+                          "-"}
                       </td>
                       {reportType === "balance" && <td>{row["Смена"]}</td>}
                       {selectedTags.map((t, i) => {
@@ -830,11 +830,11 @@ const CreateReportPage: React.FC = () => {
                         return (
                           <td key={i}>
                             {value !== undefined &&
-                            value !== null &&
-                            value !== ""
+                              value !== null &&
+                              value !== ""
                               ? Number(value).toLocaleString("ru-RU", {
-                                  maximumFractionDigits: 3,
-                                })
+                                maximumFractionDigits: 3,
+                              })
                               : "-"}
                           </td>
                         );

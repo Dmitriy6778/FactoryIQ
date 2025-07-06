@@ -140,7 +140,6 @@ def delete_polling_task(req: TaskIdRequest):
         cursor.execute("DELETE FROM PollingTaskTags WHERE polling_task_id=?", req.task_id)
     return {"ok": True}
 
-
 @router.post("/start_selected_polling")
 def start_selected_polling(req: StartSelectedPollingRequest):
     from ..config import get_conn_str
@@ -175,42 +174,53 @@ def start_selected_polling(req: StartSelectedPollingRequest):
                 "message": "Не выбрано ни одного тега для создания задачи опроса."
             }
 
-        # Проверка на дубликаты (как было)
+        # --- Найти активную задачу с этим сервером и этим интервалом ---
         cursor.execute("""
             SELECT id FROM PollingTasks
             WHERE server_url = ? AND interval_id = ? AND is_active = 1
         """, req.endpoint_url, req.interval_id)
-        candidate_tasks = [row[0] for row in cursor.fetchall()]
-
-        tag_ids_set = set(tag_ids)
-        for task_id in candidate_tasks:
-            cursor.execute("SELECT tag_id FROM PollingTaskTags WHERE polling_task_id = ?", task_id)
-            task_tag_ids = set(row[0] for row in cursor.fetchall())
-            if tag_ids_set == task_tag_ids:
+        row = cursor.fetchone()
+        if row:
+            polling_task_id = row[0]
+            # Выбираем уже существующие теги
+            cursor.execute("SELECT tag_id FROM PollingTaskTags WHERE polling_task_id = ?", polling_task_id)
+            existing_tag_ids = set(r[0] for r in cursor.fetchall())
+            new_tag_ids = [tid for tid in tag_ids if tid not in existing_tag_ids]
+            if not new_tag_ids:
                 return {
                     "ok": False,
-                    "message": f"Уже существует задача с такими тегами (task_id={task_id})"
+                    "message": f"Все выбранные теги уже есть в задаче (task_id={polling_task_id})"
                 }
-
-        # Если дубля нет — создаём задачу
-        cursor.execute("""
-            INSERT INTO PollingTasks (server_url, interval_id, is_active)
-            VALUES (?, ?, 1)
-        """, req.endpoint_url, req.interval_id)
-        polling_task_id = cursor.execute("SELECT @@IDENTITY").fetchval()
-        conn.commit()
-
-        rows = [(polling_task_id, tid) for tid in tag_ids]
-        if not rows:
+            # Добавляем только новые
+            rows = [(polling_task_id, tid) for tid in new_tag_ids]
+            cursor.fast_executemany = True
+            cursor.executemany(
+                "INSERT INTO PollingTaskTags (polling_task_id, tag_id) VALUES (?, ?)", rows
+            )
+            conn.commit()
             return {
-                "ok": False,
-                "message": "Вы не выбрали ни одного нового тега для опроса."
+                "ok": True,
+                "task_id": polling_task_id,
+                "added_tags": new_tag_ids,
+                "message": f"Добавлены теги в существующую задачу (task_id={polling_task_id})"
             }
-
-        cursor.fast_executemany = True
-        cursor.executemany(
-            "INSERT INTO PollingTaskTags (polling_task_id, tag_id) VALUES (?, ?)", rows
-        )
-        conn.commit()
-
-    return {"ok": True, "task_id": polling_task_id, "added_tags": tag_ids}
+        else:
+            # Создаем новую задачу если не нашли активной
+            cursor.execute("""
+                INSERT INTO PollingTasks (server_url, interval_id, is_active)
+                VALUES (?, ?, 1)
+            """, req.endpoint_url, req.interval_id)
+            polling_task_id = cursor.execute("SELECT @@IDENTITY").fetchval()
+            conn.commit()
+            rows = [(polling_task_id, tid) for tid in tag_ids]
+            cursor.fast_executemany = True
+            cursor.executemany(
+                "INSERT INTO PollingTaskTags (polling_task_id, tag_id) VALUES (?, ?)", rows
+            )
+            conn.commit()
+            return {
+                "ok": True,
+                "task_id": polling_task_id,
+                "added_tags": tag_ids,
+                "message": "Создана новая задача"
+            }
