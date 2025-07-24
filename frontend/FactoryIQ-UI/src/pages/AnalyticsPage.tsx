@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import styles from "../styles/AnalyticsPage.module.css";
 import { BarChart2 } from "lucide-react";
 import Charts from "../components/Charts";
-import TagChipList from "../components/TagChipList"; // или путь до компонента
-import BackButton from "../components/BackButton"; // Компонент кнопки "Назад"
+import TagChipList from "../components/TagChipList";
+import BackButton from "../components/BackButton";
 
 // Типы
 type Tag = {
@@ -67,12 +67,14 @@ const AnalyticsPage: React.FC = () => {
     const [analyticType, setAnalyticType] = useState("trend");
     const [chartType, setChartType] = useState("line");
     const [aggregateType, setAggregateType] = useState("SUM");
+    const [averageInterval, setAverageInterval] = useState(10); // Новое: интервал усреднения для AVG
+
     const [showPoints, setShowPoints] = useState(true);
     const [showGrid, setShowGrid] = useState(true);
     const [fillArea, setFillArea] = useState(false);
     const [gradient, setGradient] = useState(false);
     const [animation, setAnimation] = useState(true);
-    // Храним стили как локальные переменные — только для передачи в Charts, setters не нужны
+
     const pointStyle = "circle";
     const lineStyle = "solid";
     const lineWidth = 3;
@@ -90,10 +92,7 @@ const AnalyticsPage: React.FC = () => {
     useEffect(() => {
         fetch("http://localhost:8000/tags/all")
             .then(res => res.json())
-            .then(res => {
-                console.log("TAGS:", res.items?.slice(0, 5)); // Посмотри, есть ли description
-                setTags(res.items || []);
-            });
+            .then(res => setTags(res.items || []));
     }, []);
 
     useEffect(() => {
@@ -123,16 +122,11 @@ const AnalyticsPage: React.FC = () => {
         setSelectedTags(selectedTags.filter(t => t.id !== id));
     };
 
-    const prepareData = (apiData: any[]): { x: any; y: number; shift_type?: string }[] => {
-        if (analyticType === "shift_delta") {
-            return [];
-        }
-        return (apiData || []).map(row => ({
-            x: row.shift_start ?? row.timestamp ?? row.day,
-            y: row.delta ?? row.value ?? row.result ?? null,
-            shift_type: row.shift_type ?? "",
-        }));
-    };
+    function toSqlDatetime(dt) {
+        if (!dt) return "";
+        // dt = "2025-07-08T13:45" → "2025-07-08 13:45:00"
+        return dt.replace("T", " ") + ":00";
+    }
 
     function groupShiftsForChart(apiData: any[], tagLabel = ""): ChartDataset[] {
         const grouped: Record<string, { day: number | null, night: number | null }> = {};
@@ -180,21 +174,35 @@ const AnalyticsPage: React.FC = () => {
         setSeriesColors(Array(data.length).fill(0).map(() => getRandomColorHex()));
     };
 
+    // --- ГЛАВНАЯ ЛОГИКА FETCH ---
     const fetchData = async () => {
         if (selectedTags.length === 0 || !dateFrom || !dateTo) return;
         setLoading(true);
         try {
             const allData: ChartDataset[] = [];
+            const fromSql = toSqlDatetime(dateFrom);
+            const toSql = toSqlDatetime(dateTo);
             for (const tag of selectedTags) {
                 let url = "";
+                // 1. Тренд (сырые значения)
                 if (analyticType === "trend") {
-                    url = `http://localhost:8000/analytics/trend?tag_id=${tag.id}&date_from=${dateFrom}&date_to=${dateTo}`;
-                } else if (analyticType === "daily_delta") {
-                    url = `http://localhost:8000/analytics/daily-delta?tag_id=${tag.id}&date_from=${dateFrom}&date_to=${dateTo}`;
-                } else if (analyticType === "shift_delta") {
-                    url = `http://localhost:8000/analytics/shift-delta?tag_id=${tag.id}&date_from=${dateFrom}&date_to=${dateTo}`;
-                } else if (analyticType === "aggregate") {
-                    url = `http://localhost:8000/analytics/aggregate?agg_type=${aggregateType}&tag_id=${tag.id}&date_from=${dateFrom}&date_to=${dateTo}`;
+                    url = `http://localhost:8000/analytics/trend?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
+                }
+                // 2. Суточные приросты
+                else if (analyticType === "daily_delta") {
+                    url = `http://localhost:8000/analytics/daily-delta?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
+                }
+                // 3. Сменные приросты
+                else if (analyticType === "shift_delta") {
+                    url = `http://localhost:8000/analytics/shift-delta?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
+                }
+                // 4. Агрегация
+                else if (analyticType === "aggregate") {
+                    if (aggregateType === "AVG") {
+                        url = `http://localhost:8000/analytics/avg-trend?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}&interval_minutes=${averageInterval}`;
+                    } else {
+                        url = `http://localhost:8000/analytics/aggregate?agg_type=${aggregateType}&tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
+                    }
                 }
                 const resp = await fetch(url);
                 if (!resp.ok) {
@@ -208,10 +216,31 @@ const AnalyticsPage: React.FC = () => {
                     const label = tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`;
                     const datasets = groupShiftsForChart(res.items || [], label);
                     allData.push(...datasets);
-                } else {
+                } else if (analyticType === "aggregate" && aggregateType === "AVG") {
                     allData.push({
                         label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
-                        data: prepareData(res.items || []),
+                        data: (res.items || []).map((row: any) => ({
+                            x: row.timestamp,
+                            y: row.value,
+                        })),
+                    });
+                } else if (analyticType === "aggregate") {
+                    // Сумма/минимум/максимум — одна точка!
+                    allData.push({
+                        label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
+                        data: (res.items || []).map((row: any) => ({
+                            x: fromSql + " - " + toSql,
+                            y: row.result,
+                        })),
+                    });
+                } else {
+                    // trend, daily_delta
+                    allData.push({
+                        label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
+                        data: (res.items || []).map((row: any) => ({
+                            x: row.timestamp || row.day || row.shift_start,
+                            y: row.value ?? row.delta ?? row.result,
+                        })),
                     });
                 }
             }
@@ -230,7 +259,6 @@ const AnalyticsPage: React.FC = () => {
         }
         setLoading(false);
     };
-
     useEffect(() => {
         if (!data || data.length === 0) return;
         setData(prevData => {
@@ -245,8 +273,6 @@ const AnalyticsPage: React.FC = () => {
             }));
         });
     }, [seriesColors, chartType]);
-
-
 
 
     return (
@@ -338,10 +364,8 @@ const AnalyticsPage: React.FC = () => {
                                     >
                                         {tag.description || <i>— нет описания —</i>}
                                     </span>
-
                                 </div>
                             ))}
-
                         </div>
                     )}
                 </div>
@@ -393,19 +417,19 @@ const AnalyticsPage: React.FC = () => {
                 {/* Остальные элементы управления */}
                 <div style={{ marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                     <input
-                        className={styles.input}
-                        type="date"
+                        type="datetime-local"
                         value={dateFrom}
                         onChange={e => setDateFrom(e.target.value)}
-                        style={{ flex: "1 1 140px" }}
+                        className={styles.input}
                     />
                     <input
-                        className={styles.input}
-                        type="date"
+                        type="datetime-local"
                         value={dateTo}
                         onChange={e => setDateTo(e.target.value)}
-                        style={{ flex: "1 1 140px" }}
+                        className={styles.input}
                     />
+
+
                     <select
                         className={styles.input}
                         value={analyticType}
@@ -417,16 +441,30 @@ const AnalyticsPage: React.FC = () => {
                         ))}
                     </select>
                     {analyticType === "aggregate" && (
-                        <select
-                            className={styles.input}
-                            value={aggregateType}
-                            onChange={e => setAggregateType(e.target.value)}
-                            style={{ flex: "1 1 140px" }}
-                        >
-                            {AGGREGATES.map(opt => (
-                                <option key={opt.key} value={opt.key}>{opt.label}</option>
-                            ))}
-                        </select>
+                        <>
+                            <select
+                                className={styles.input}
+                                value={aggregateType}
+                                onChange={e => setAggregateType(e.target.value)}
+                                style={{ flex: "1 1 140px" }}
+                            >
+                                {AGGREGATES.map(opt => (
+                                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                                ))}
+                            </select>
+                            {aggregateType === "AVG" && (
+                                <input
+                                    className={styles.input}
+                                    type="number"
+                                    min={1}
+                                    max={1440}
+                                    value={averageInterval}
+                                    onChange={e => setAverageInterval(Number(e.target.value))}
+                                    placeholder="Интервал усреднения (мин)"
+                                    style={{ flex: "1 1 160px" }}
+                                />
+                            )}
+                        </>
                     )}
                     <select
                         className={styles.input}
@@ -563,8 +601,5 @@ const AnalyticsPage: React.FC = () => {
             <div style={{ height: 20 }} />
         </div>
     );
-
-
-};
-
+}
 export default AnalyticsPage;

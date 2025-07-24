@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import styles from "../styles/CreateReportPage.module.css";
 import BackButton from "../components/BackButton";
+import CustomReportTable from "../components/CustomReportTable";
+
 // Типы тегов
 type Tag = {
   id: number;
@@ -12,17 +14,17 @@ type Tag = {
 };
 
 type ReportTagSettings = {
-  id: number;
+  id: number; // внутренний ключ (для React, уникальный)
   tag: Tag;
   type: "counter" | "current";
-  aggregate?: "SUM" | "AVG" | "MIN" | "MAX" | ""; // теперь опционально
+  aggregate?: "" | "SUM" | "AVG" | "MIN" | "MAX";
   intervalMinutes: number;
 };
 
 type ReportTemplateTag = {
   tag_id: number;
   tag_type: string;
-  aggregate: string;
+  aggregate: "" | "SUM" | "AVG" | "MIN" | "MAX";
   interval_minutes: number;
   display_order: number;
 };
@@ -44,8 +46,16 @@ function getTagKey(tag: Tag): string {
   return tag.browse_name || tag.name;
 }
 
+function getShiftFromTimeGroup(timeGroup: string | undefined): string {
+  if (!timeGroup) return "-";
+  const hour = Number(timeGroup.slice(11, 13)); // "2025-06-01T08:00:00"
+  if (hour >= 8 && hour < 20) return "Дневная";
+  return "Ночная";
+}
+
+
 const AGGREGATE_OPTIONS = [
-  { key: "", label: "Без агрегации (сырое/последнее)" }, // Добавляем это!
+  { key: "", label: "Без агрегации (сырое/последнее)" },
   { key: "SUM", label: "Сумма (SUM)" },
   { key: "AVG", label: "Среднее (AVG)" },
   { key: "MIN", label: "Минимум (MIN)" },
@@ -70,23 +80,21 @@ const CreateReportPage: React.FC = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [reportType, setReportType] = useState("balance");
+  const [reportType, setReportType] = useState<"balance" | "custom">("balance");
   const [reportBuilt, setReportBuilt] = useState(false);
   const [reportTableRows, setReportTableRows] = useState<any[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(
-    null
-  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [templateTags, setTemplateTags] = useState<ReportTemplateTag[]>([]);
   const [showTemplateTags, setShowTemplateTags] = useState(false);
 
-  const [aggregate, setAggregate] = useState(""); // или "AVG" по дефолту
-  const [interval, setInterval] = useState(10); // дефолтный шаг
+  const [aggregate, setAggregate] = useState<"" | "SUM" | "AVG" | "MIN" | "MAX">(""); // или "AVG" по дефолту
+  const [interval, setInterval] = useState<number>(10); // дефолтный шаг
   const [showDailySum, setShowDailySum] = useState(true);
 
   const handleReportTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setReportType(e.target.value);
-    setSelectedTags([]); // сбрасываем выбранные теги
+    setReportType(e.target.value as "balance" | "custom");
+    setSelectedTags([]);
   };
 
   // Получение всех тегов
@@ -159,13 +167,33 @@ const CreateReportPage: React.FC = () => {
       {
         id: Date.now() + Math.random(),
         tag,
-        type: "counter",
-        aggregate: "", // по умолчанию сырое!
-        intervalMinutes: 1, // 1 минута по дефолту, для кастомных отчётов
+        type: reportType === "custom" ? "current" : "counter",
+        aggregate: "",
+        intervalMinutes: 1,
       },
     ]);
-    setFilter("");
   };
+
+  // Загрузка тегов шаблона по ID (чтобы заполнять selectedTags)
+  async function loadTemplateTagsForReport(templateId: number): Promise<ReportTagSettings[]> {
+    const res = await fetch(`${API_BASE}/reports/templates/${templateId}`);
+    const data = await res.json();
+    if (data.ok && data.template) {
+      const selectedTagsFromTemplate: ReportTagSettings[] = (data.template.tags || []).map((t: ReportTemplateTag) => {
+        const tagInfo = allTags.find((at) => at.id === t.tag_id);
+        return {
+          id: Date.now() + Math.random(),
+          tag: tagInfo || { id: t.tag_id, name: t.tag_id.toString() },
+          type: t.tag_type as "counter" | "current",
+          aggregate: (t.aggregate || "") as "" | "SUM" | "AVG" | "MIN" | "MAX",
+          intervalMinutes: t.interval_minutes,
+        };
+      });
+      setSelectedTags(selectedTagsFromTemplate);
+      return selectedTagsFromTemplate;
+    }
+    return [];
+  }
 
   const removeTag = (id: number) => {
     setSelectedTags(selectedTags.filter((t) => t.id !== id));
@@ -182,18 +210,28 @@ const CreateReportPage: React.FC = () => {
       return;
     }
     setLoading(true);
+
+    // Для custom — все теги получают одинаковые агрегацию/интервал из формы
+    const tagsToSave: ReportTagSettings[] = reportType === "custom"
+      ? selectedTags.map((t) => ({
+        ...t,
+        aggregate: aggregate,
+        intervalMinutes: interval,
+      }))
+      : selectedTags;
+
     fetch(`${API_BASE}/reports/templates/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: templateName,
-        description: "", // или реальное описание
+        description: "",
         report_type: reportType,
-        period_type: "", // если есть выбор периода
-        tags: selectedTags.map((t) => ({
+        period_type: "",
+        tags: tagsToSave.map((t) => ({
           tag_id: t.tag.id,
           tag_type: t.type,
-          aggregate: t.aggregate || null,
+          aggregate: t.aggregate ?? null,
           interval_minutes: t.intervalMinutes,
         })),
         is_shared: false,
@@ -214,6 +252,102 @@ const CreateReportPage: React.FC = () => {
       .finally(() => setLoading(false));
   };
 
+
+  const handleBuildByTemplate = async (templateId: number, tplReportType: string) => {
+    setReportType(tplReportType as "balance" | "custom");
+    if (!dateFrom || !dateTo) {
+      alert("Укажите период!");
+      return;
+    }
+    setLoading(true);
+
+    const loadedTags = await loadTemplateTagsForReport(templateId);
+    if (!loadedTags.length) {
+      alert("В шаблоне нет тегов");
+      setLoading(false);
+      return;
+    }
+
+    let tagsForBuild: ReportTagSettings[] = loadedTags;
+    if (tplReportType === "custom") {
+      tagsForBuild = loadedTags.map(t => ({
+        ...t,
+        aggregate: aggregate,
+        intervalMinutes: interval,
+      }));
+    }
+
+    // КРИТИЧНО: подставить теги из шаблона как выбранные для баланса!
+    if (tplReportType === "balance") {
+      setSelectedTags(loadedTags);
+    }
+
+    const url =
+      tplReportType === "balance"
+        ? `${API_BASE}/reports/build`
+        : `${API_BASE}/reports/build_custom`;
+
+    const payload =
+      tplReportType === "balance"
+        ? {
+          template_id: templateId,
+          date_from: toSqlDatetime(dateFrom),
+          date_to: toSqlDatetime(dateTo),
+        }
+        : {
+          tags: tagsForBuild.map((t) => ({
+            tag_id: t.tag.id,
+            aggregate: t.aggregate || "",
+            interval_minutes: t.intervalMinutes,
+          })),
+          date_from: toSqlDatetime(dateFrom),
+          date_to: toSqlDatetime(dateTo),
+        };
+
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok) {
+          if (tplReportType === "custom") {
+            const grouped = groupRowsForTable(data.data || [], tagsForBuild);
+            setReportTableRows(grouped);
+            setReportBuilt(true);
+          } else {
+            // balance
+            const groupedRows: Record<string, any> = {};
+            (data.data || []).forEach((row: any) => {
+              const key = `${row.Date}_${row["Смена"]}`;
+              if (!groupedRows[key]) {
+                groupedRows[key] = {
+                  Date: row.Date,
+                  Смена: row["Смена"],
+                };
+              }
+              const rawVal = row["Прирост"] ?? row["Value"] ?? row["Значение"];
+              groupedRows[key][row.TagName] =
+                rawVal !== undefined
+                  ? +(parseFloat(String(rawVal)) / 1000).toFixed(1)
+                  : "-";
+            });
+            setReportTableRows(Object.values(groupedRows));
+            setReportBuilt(true);
+          }
+        } else {
+          alert("Ошибка построения: " + (data.detail || "Неизвестно"));
+        }
+      })
+      .catch((e) => alert("Ошибка: " + e.message))
+      .finally(() => setLoading(false));
+  };
+
+
+
+
+  // --- Конвертация даты в формат SQL ---
   function toSqlDatetime(dateStr: string): string {
     if (!dateStr) return "";
     let d = dateStr.length >= 19 ? dateStr.slice(0, 19) : dateStr;
@@ -223,27 +357,32 @@ const CreateReportPage: React.FC = () => {
     return d;
   }
 
-  // Группируем данные для рендера таблицы
+  // --- Группировка строк по времени и тегу (универсальная, с типами) ---
+
+
   function groupRowsForTable(
-    rows: any[],
+    rows: { TagId: number; TimeGroup: string; Value: number | null }[],
     selectedTags: ReportTagSettings[]
   ): any[] {
+    // Собираем все уникальные TimeGroup
     const timeGroups = Array.from(new Set(rows.map((r) => r.TimeGroup))).sort();
 
     return timeGroups.map((tg) => {
       const row: any = { TimeGroup: tg };
       selectedTags.forEach((tag) => {
+        // ищем строку с нужным TagId и TimeGroup
         const entry = rows.find(
-          (r) => r.TimeGroup === tg && r.TagId === tag.tag.id
+          (r) => r.TimeGroup === tg && String(r.TagId) === String(tag.tag.id)
         );
-        // Используем специальный ключ — это важно!
         row[`Value_${tag.tag.id}`] = entry ? entry.Value : null;
       });
       return row;
     });
   }
 
-  // Построить отчёт
+
+
+  // --- Построить отчёт вручную ---
   const buildReport = () => {
     if (selectedTags.length === 0) {
       alert("Выберите хотя бы один тег");
@@ -267,17 +406,17 @@ const CreateReportPage: React.FC = () => {
             aggregate,
             interval_minutes: interval,
           })),
-
           date_from: toSqlDatetime(dateFrom),
           date_to: toSqlDatetime(dateTo),
         }),
       })
         .then((res) => res.json())
         .then((data) => {
-          console.log("RAW report data:", data.data);
           if (data.ok) {
+            console.log('raw rows:', data.data) // до groupRowsForTable
             const grouped = groupRowsForTable(data.data || [], selectedTags);
             setReportTableRows(grouped);
+            console.log('grouped:', grouped); // <- вот так можно!
             setReportBuilt(true);
           } else {
             alert("Ошибка построения: " + (data.detail || "Неизвестно"));
@@ -343,16 +482,18 @@ const CreateReportPage: React.FC = () => {
       .finally(() => setLoading(false));
   };
 
+  // --- Формат даты для таблицы ---
   function formatDateTimeCustom(dt: string): string {
-    // Ожидает: '2025-07-01 08:00:00' или '2025-07-01T08:00:00'
     if (!dt) return "";
-    let s = dt.replace("T", " ").slice(0, 19);
+    let s = dt.replace("T", " ").slice(0, 19); // убирает "T", если есть
     const [date, time] = s.split(" ");
     if (!date || !time) return s;
     const [y, m, d] = date.split("-");
+    if (!y || !m || !d) return s;
     return `${d}.${m}.${y} ${time}`;
   }
 
+  // --- Экспорт в Excel ---
   const exportToExcel = () => {
     if (!reportTableRows.length || selectedTags.length === 0) return;
 
@@ -374,32 +515,27 @@ const CreateReportPage: React.FC = () => {
           const val = row[getTagKey(tag.tag)];
           const num =
             typeof val === "string" ? parseFloat(val.replace(",", ".")) : val;
-          return !isNaN(num) ? +(+num).toFixed(1) : "-";
+          return !isNaN(num) ? +(+num).toFixed(3) : "-";
         }),
       ]);
     } else {
+      // Для custom отчёта
       headers = [
         "Дата и время",
+        "Смена",
         ...selectedTags.map(
           (t) => `${t.tag.description || t.tag.browse_name || t.tag.name}`
         ),
       ];
       dataRows = reportTableRows.map((row) => [
-        formatDateTimeCustom(
-          row.TimeGroup ||
-          row.Date ||
-          row.Timestamp ||
-          row.dt ||
-          row.datetime ||
-          ""
-        ),
+        formatDateTimeCustom(row.TimeGroup),
+        getShiftFromTimeGroup(row.TimeGroup),
         ...selectedTags.map((tag) => {
           const key = `Value_${tag.tag.id}`;
-          const val =
-            row[key] !== undefined ? row[key] : row[getTagKey(tag.tag)];
+          const val = row[key];
           const num =
             typeof val === "string" ? parseFloat(val.replace(",", ".")) : val;
-          return !isNaN(num) ? +(+num).toFixed(1) : "-";
+          return !isNaN(num) && num !== null && num !== undefined ? +(+num).toFixed(3) : "-";
         }),
       ]);
     }
@@ -423,7 +559,7 @@ const CreateReportPage: React.FC = () => {
       const totalRow = [
         "Итого",
         "",
-        ...selectedTags.map((tag) => +totals[getTagKey(tag.tag)].toFixed(1)),
+        ...selectedTags.map((tag) => +totals[getTagKey(tag.tag)].toFixed(3)),
       ];
       ws_data = [headers, ...dataRows, totalRow];
     } else {
@@ -444,7 +580,6 @@ const CreateReportPage: React.FC = () => {
         };
       }
     }
-
     // Автоширина
     ws["!cols"] = headers.map((_, i) => {
       const colValues = ws_data.map((row) => String(row[i] ?? ""));
@@ -465,7 +600,8 @@ const CreateReportPage: React.FC = () => {
     );
   };
 
-  // Итоги по тегам за период (вычисляются на лету)
+
+  // --- Итоги по тегам для балансового отчёта (вычисляются на лету) ---
   const dailyRows = reportTableRows.filter((row) => row["Смена"] === "Сутки");
   const totals: Record<string, number> = {};
   selectedTags.forEach((t) => {
@@ -482,6 +618,8 @@ const CreateReportPage: React.FC = () => {
       return sum;
     }, 0);
   });
+
+
 
   return (
     <div className={styles.pageContainer}>
@@ -531,6 +669,16 @@ const CreateReportPage: React.FC = () => {
                     onClick={() => handleDeleteTemplate(tpl.id)}
                   >
                     Удалить
+                  </button>
+                  <button
+                    className={styles.reportSmallBtn}
+                    onClick={() =>
+                      tpl.report_type
+                        ? handleBuildByTemplate(tpl.id, tpl.report_type)
+                        : alert("Тип отчёта не задан!")
+                    }
+                  >
+                    Построить по шаблону
                   </button>
                 </td>
               </tr>
@@ -598,9 +746,7 @@ const CreateReportPage: React.FC = () => {
         </div>
 
         {/* Поиск и добавление тегов */}
-        <div className={styles.reportSectionTitle}>
-          Добавление тегов в отчёт
-        </div>
+        <div className={styles.reportSectionTitle}>Добавление тегов в отчёт</div>
         <div className={styles.tagSearchBlock}>
           <input
             ref={inputRef}
@@ -672,7 +818,8 @@ const CreateReportPage: React.FC = () => {
                 <select
                   className={styles.reportSelect}
                   value={aggregate}
-                  onChange={(e) => setAggregate(e.target.value)}
+                  onChange={(e) => setAggregate(e.target.value as "" | "SUM" | "AVG" | "MIN" | "MAX")}
+
                 >
                   {AGGREGATE_OPTIONS.map((opt) => (
                     <option key={opt.key} value={opt.key}>
@@ -681,20 +828,24 @@ const CreateReportPage: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <label>
-                Интервал (мин):&nbsp;
-                <input
-                  className={styles.reportInput}
-                  type="number"
-                  min={1}
-                  max={1440}
-                  value={interval}
-                  onChange={(e) => setInterval(Number(e.target.value))}
-                />
-              </label>
+              {/* Показывать только если aggregate выбрана */}
+              {aggregate && (
+                <label>
+                  Интервал (мин):&nbsp;
+                  <input
+                    className={styles.reportInput}
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={interval}
+                    onChange={(e) => setInterval(Number(e.target.value))}
+                  />
+                </label>
+              )}
             </div>
           </>
         )}
+
         {/* --- КОНЕЦ блока общих настроек --- */}
 
         {/* Период отчёта */}
@@ -770,6 +921,7 @@ const CreateReportPage: React.FC = () => {
         </div>
 
         {/* Итоговая таблица */}
+
         {reportBuilt && reportTableRows.length > 0 && (
           <>
             <div
@@ -780,91 +932,65 @@ const CreateReportPage: React.FC = () => {
               Таблица отчёта
             </div>
             <div className={styles.reportWideTableBlock}>
-              <table className={styles.reportWideTable}>
-                <thead>
-                  <tr>
-                    <th>Дата{reportType === "custom" ? " и время" : ""}</th>
-                    {reportType === "balance" && <th>Смена</th>}
-                    {selectedTags.map((t, i) => (
-                      <th key={i}>
-                        {t.tag.description || t.tag.browse_name || t.tag.name}
-                        {aggregate
-                          ? `, ${AGGREGATE_OPTIONS.find((a) => a.key === aggregate)
-                            ?.label
-                          }`
-                          : ""}
-                        {interval ? `, ${interval} мин` : ""}
-                      </th>
+              {reportType === "custom" ? (
+                <CustomReportTable
+                  rows={reportTableRows}
+                  selectedTags={selectedTags}
+                />
+              ) : (
+                <table className={styles.reportWideTable}>
+                  <thead>
+                    <tr>
+                      <th>Дата</th>
+                      <th>Смена</th>
+                      {selectedTags.map((t, i) => (
+                        <th key={i}>
+                          {t.tag.description || t.tag.browse_name || t.tag.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportTableRows.map((row, idx) => (
+                      <tr key={idx}>
+                        <td>{row.Date || "-"}</td>
+                        <td>{row["Смена"] ?? "-"}</td>
+                        {selectedTags.map((t, i) => {
+                          const key = t.tag.browse_name;
+                          const val = row[`Value_${t.tag.id}`] ?? row[key];
+                          return (
+                            <td key={i}>
+                              {val == null || val === "" ? "-" : val}
+                            </td>
+                          );
+                        })}
+                      </tr>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportTableRows.map((row, idx) => (
-                    <tr key={idx}>
-                      <td>
-                        {reportType === "custom"
-                          ? formatDateTimeCustom(
-                            row.TimeGroup ||
-                            row.Date ||
-                            row.Timestamp ||
-                            row.dt ||
-                            row.datetime ||
-                            ""
-                          )
-                          : row.Date ||
-                          row.TimeGroup ||
-                          row.Timestamp ||
-                          row.dt ||
-                          row.datetime ||
-                          "-"}
-                      </td>
-                      {reportType === "balance" && <td>{row["Смена"]}</td>}
-                      {selectedTags.map((t, i) => {
-                        let value;
-                        if (reportType === "custom") {
-                          value =
-                            row[`Value_${t.tag.id}`] ?? row[getTagKey(t.tag)];
-                        } else {
-                          value = row[getTagKey(t.tag)];
-                        }
-                        return (
-                          <td key={i}>
-                            {value !== undefined &&
-                              value !== null &&
-                              value !== ""
-                              ? Number(value).toLocaleString("ru-RU", {
+                    {/* Итоги только для балансового */}
+                    {showDailySum && (
+                      <tr style={{ fontWeight: "bold", background: "#e3fbfa" }}>
+                        <td colSpan={2}>Итого</td>
+                        {selectedTags.map((t, i) => {
+                          const tagKey = t.tag.browse_name;
+                          return (
+                            <td key={i}>
+                              {totals[tagKey]?.toLocaleString("ru-RU", {
                                 maximumFractionDigits: 3,
-                              })
-                              : "-"}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                  {/* Итоги по суткам для балансового отчёта */}
-                  {reportType === "balance" && showDailySum && (
-                    <tr style={{ fontWeight: "bold", background: "#e3fbfa" }}>
-                      <td colSpan={2}>Итого</td>
-                      {selectedTags.map((t, i) => {
-                        const tagKey = getTagKey(t.tag);
-                        return (
-                          <td key={i}>
-                            {totals[tagKey]?.toLocaleString("ru-RU", {
-                              maximumFractionDigits: 3,
-                            })}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                              })}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
           </>
         )}
+
       </div>
     </div>
   );
-};
-
+}
 export default CreateReportPage;

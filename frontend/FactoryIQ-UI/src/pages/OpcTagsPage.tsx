@@ -3,7 +3,6 @@ import styles from "../styles/OpcTagsPage.module.css";
 import BackButton from "../components/BackButton";
 import { CheckCircle, AlertTriangle, XCircle } from "lucide-react";
 
-// Тип для интервалов опроса
 type PollingInterval = {
   id: number;
   name: string;
@@ -30,14 +29,28 @@ type OpcServer = {
   securityMode?: string;
 };
 
+type TagFilters = {
+  browse_name: string;
+  node_id: string;
+  data_type: string;
+  path: string;
+  description: string;
+};
+
 const PAGE_SIZE = 200;
-const emptyFilters = { browse_name: "", node_id: "", data_type: "", path: "" };
+const emptyFilters: TagFilters = {
+  browse_name: "",
+  node_id: "",
+  data_type: "",
+  path: "",
+  description: "",
+};
 
 const OpcTagsPage: React.FC = () => {
   const [tags, setTags] = useState<OpcTag[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ ...emptyFilters });
+  const [filters, setFilters] = useState<TagFilters>({ ...emptyFilters });
   const [loading, setLoading] = useState(false);
   const [liveValues, setLiveValues] = useState<{ [nodeId: string]: any }>({});
   const [checkedTagIds, setCheckedTagIds] = useState<number[]>([]);
@@ -48,10 +61,10 @@ const OpcTagsPage: React.FC = () => {
 
   const DEFAULT_POLICIES = ["Basic256Sha256", "None"];
   const DEFAULT_MODES = ["Sign", "None"];
-  // --- polling intervals ---
   const [intervals, setIntervals] = useState<PollingInterval[]>([]);
   const [selectedIntervalId, setSelectedIntervalId] = useState<number>(1);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Загрузка серверов и интервалов при инициализации
   useEffect(() => {
     fetch("http://localhost:8000/servers/servers")
@@ -68,29 +81,26 @@ const OpcTagsPage: React.FC = () => {
       });
   }, []);
 
-  function makeSearchQuery() {
-    const entries = Object.entries(filters).filter(([, v]) => v.trim() !== "");
-    if (!entries.length) return "";
-    return entries.map(([, v]) => v.trim()).join(" ");
+  function makeQueryParams(forPage = page) {
+    const params = new URLSearchParams();
+    params.set("page", forPage.toString());
+    params.set("page_size", PAGE_SIZE.toString());
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v.trim() !== "") params.set(k, v);
+    });
+    return params;
   }
 
   function fetchTags(newPage = page) {
     setLoading(true);
-    const params = new URLSearchParams();
-    params.set("page", newPage.toString());
-    params.set("page_size", PAGE_SIZE.toString());
-    const search = makeSearchQuery();
-    if (search) params.set("search", search);
-
-    fetch(`http://localhost:8000/tags/all?${params}`)
+    const params = makeQueryParams(newPage);
+    fetch(`http://localhost:8000/tags/all-tags?${params}`)
       .then(res => res.json())
       .then(data => {
         setTags(data.items || []);
         setTotal(data.total || 0);
         setPage(newPage);
         setCheckedTagIds([]);
-        // Сброс live-зн. (можно оставить старые, если нужно)
-        // setLiveValues({});
       })
       .catch(e => console.error("[OpcTagsPage] Ошибка загрузки тегов:", e))
       .finally(() => setLoading(false));
@@ -103,7 +113,6 @@ const OpcTagsPage: React.FC = () => {
       return;
     }
     setPlcStatus("pending");
-
     const queryParams = new URLSearchParams({
       endpoint_url: selectedServer.endpoint_url,
       opcUsername: selectedServer.opcUsername || "",
@@ -111,22 +120,14 @@ const OpcTagsPage: React.FC = () => {
       securityPolicy: selectedServer.securityPolicy || "Basic256Sha256",
       securityMode: selectedServer.securityMode || "Sign",
     }).toString();
-
-    console.log("[OpcTagsPage] Проверяем PLC через /servers/probe:", queryParams);
     fetch(`http://localhost:8000/servers/probe?${queryParams}`)
       .then(res => res.json())
-      .then(data => {
-        console.log("[OpcTagsPage] Ответ на probe:", data);
-        setPlcStatus(data.ok ? "online" : "offline");
-      })
-      .catch(e => {
-        console.error("[OpcTagsPage] Ошибка probe:", e);
-        setPlcStatus("offline");
-      });
+      .then(data => setPlcStatus(data.ok ? "online" : "offline"))
+      .catch(() => setPlcStatus("offline"));
   };
+
   function fetchLiveValues(tagIds: number[]) {
     if (!selectedServer || tagIds.length === 0) {
-      console.warn("[OpcTagsPage] fetchLiveValues: сервер не выбран или tagIds пустой", selectedServer, tagIds);
       return;
     }
     setLoading(true);
@@ -135,32 +136,32 @@ const OpcTagsPage: React.FC = () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tag_ids: tagIds,
-        server_id: selectedServer.id  // можно не передавать, если не нужен
+        server_id: selectedServer.id,
       }),
     })
       .then(res => res.json())
       .then(data => {
         if (data.ok) setLiveValues(data.values || {});
-        else {
-          setLiveValues({});
-          console.warn("[OpcTagsPage] Сервер вернул не ok для live values:", data);
-        }
+        else setLiveValues({});
       })
-      .catch(e => {
-        setLiveValues({});
-        console.error("[OpcTagsPage] Ошибка live fetch:", e);
-      })
+      .catch(() => setLiveValues({}))
       .finally(() => setLoading(false));
   }
-  
 
-  // FILTERS
-  function handleFilterChange(field: keyof typeof filters, value: string) {
+  function handleFilterChange(field: keyof TagFilters, value: string) {
     setFilters(f => ({ ...f, [field]: value }));
+
+    // Debounce-поиск
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    debounceTimeout.current = setTimeout(() => {
+      fetchTags(1);
+    }, 300); // 300мс задержка, можно больше/меньше
   }
+
   function handleFilterKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter") fetchTags(1);
   }
+
   function resetFilters() {
     setFilters({ ...emptyFilters });
     setTimeout(() => fetchTags(1), 100);
@@ -168,7 +169,6 @@ const OpcTagsPage: React.FC = () => {
 
   async function handleDescriptionChange(tag: OpcTag, newDesc: string) {
     try {
-      console.log("[OpcTagsPage] Изменяем описание тега", tag.id, "->", newDesc);
       await fetch(`http://localhost:8000/tags/${tag.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -183,7 +183,6 @@ const OpcTagsPage: React.FC = () => {
   async function handleDelete(id: number) {
     if (!window.confirm("Удалить этот тег?")) return;
     try {
-      console.log("[OpcTagsPage] Удаляем тег", id);
       await fetch(`http://localhost:8000/tags/${id}`, { method: "DELETE" });
       fetchTags();
     } catch (e) {
@@ -191,8 +190,7 @@ const OpcTagsPage: React.FC = () => {
     }
   }
 
- // --- КНОПКА ЗАПУСКА ОПРОСА ---
-async function handleStartPolling() {
+  async function handleStartPolling() {
     if (!checkedTagIds.length || !selectedServer) {
       alert("Выберите сервер и хотя бы один тег для опроса.");
       return;
@@ -214,14 +212,12 @@ async function handleStartPolling() {
       interval_id: selectedIntervalId,
     };
     try {
-      console.log("[OpcTagsPage] Запускаем опрос через /polling/start_selected_polling", body);
       const res = await fetch("http://localhost:8000/polling/start_selected_polling", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      console.log("[OpcTagsPage] Ответ на старт polling:", data);
       if (data.ok) {
         if (data.added_tags && data.added_tags.length > 0) {
           alert(`Теги добавлены к существующей задаче (task_id=${data.task_id}).\nДобавлено: ${data.added_tags.length}`);
@@ -236,25 +232,18 @@ async function handleStartPolling() {
         alert("Ошибка запуска: " + (data.message || "Неизвестная ошибка"));
       }
     } catch (err) {
-      console.error("[OpcTagsPage] Ошибка запуска polling:", err);
       alert("Ошибка соединения: " + err);
     }
   }
-  
 
   // Основная подгрузка тегов при изменении сервера
   useEffect(() => {
     if (selectedServer) {
-      console.log("[OpcTagsPage] Выбран сервер, запускаем probePlc");
       probePlc();
-      fetchTags(1); // При смене сервера обновляем теги
+      fetchTags(1);
     }
-  }, [selectedServer]);
-
-  useEffect(() => {
-    fetchTags(page);
     // eslint-disable-next-line
-  }, [filters, page]);
+  }, [selectedServer]);
 
   useEffect(() => {
     if (!autoRefresh) {
@@ -262,16 +251,17 @@ async function handleStartPolling() {
       return;
     }
     const tagIds = tags.map(t => t.id);
-    fetchLiveValues(tagIds); // сразу при старте
+    fetchLiveValues(tagIds);
     intervalRef.current = window.setInterval(() => fetchLiveValues(tagIds), 10000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    // eslint-disable-next-line
   }, [autoRefresh, tags, selectedServer]);
-  
 
-  // --- Отключение автообновления при уходе со страницы
+  // Отключение автообновления при уходе со страницы
   useEffect(() => () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
   }, []);
+
 
   return (
     <div className={styles.page} style={{ minWidth: 0 }}>
@@ -300,6 +290,9 @@ async function handleStartPolling() {
           )}
         </span>
       </div>
+
+
+
       <div style={{ marginBottom: 16 }}>
         <label>Сервер:&nbsp;
           <select
@@ -370,6 +363,50 @@ async function handleStartPolling() {
         </button>
       </div>
       {/* -------------------------------- */}
+
+      <div className={styles.tableFilters}>
+        <input
+          className={styles.input}
+          placeholder="Имя..."
+          value={filters.browse_name}
+          onChange={e => handleFilterChange("browse_name", e.target.value)}
+          onKeyDown={handleFilterKeyDown}
+        />
+        <input
+          className={styles.input}
+          placeholder="Node ID..."
+          value={filters.node_id}
+          onChange={e => handleFilterChange("node_id", e.target.value)}
+          onKeyDown={handleFilterKeyDown}
+        />
+        <input
+          className={styles.input}
+          placeholder="Тип..."
+          value={filters.data_type}
+          onChange={e => handleFilterChange("data_type", e.target.value)}
+          onKeyDown={handleFilterKeyDown}
+        />
+        <input
+          className={styles.input}
+          placeholder="Путь..."
+          value={filters.path}
+          onChange={e => handleFilterChange("path", e.target.value)}
+          onKeyDown={handleFilterKeyDown}
+        />
+        <input
+          className={styles.input}
+          placeholder="Описание..."
+          value={filters.description || ""}
+          onChange={e => handleFilterChange("description", e.target.value)}
+          onKeyDown={handleFilterKeyDown}
+        />
+        <button className={styles.button} onClick={() => fetchTags(1)}>🔍</button>
+        <button className={styles.button} onClick={resetFilters}>Сброс</button>
+        <span className={styles.filtersInfo}>
+          Показано: {tags.length} из {total}
+        </span>
+      </div>
+
       <div style={{ width: "100%", maxWidth: "none" }}>
         <table className={styles.table} style={{ width: "99vw", minWidth: 1280, maxWidth: "100%" }}>
           <thead>
@@ -386,40 +423,12 @@ async function handleStartPolling() {
                   title="Выбрать все"
                 />
               </th>
-              <th style={{ minWidth: 160, maxWidth: 220 }}>
-                Имя
-                <input className={styles.input} style={{ width: "98%" }}
-                  placeholder="Фильтр..." value={filters.browse_name}
-                  onChange={e => handleFilterChange("browse_name", e.target.value)}
-                  onKeyDown={handleFilterKeyDown}
-                />
-              </th>
-              <th style={{ minWidth: 150, maxWidth: 310 }}>
-                Node ID
-                <input className={styles.input} style={{ width: "98%" }}
-                  placeholder="Фильтр..." value={filters.node_id}
-                  onChange={e => handleFilterChange("node_id", e.target.value)}
-                  onKeyDown={handleFilterKeyDown}
-                />
-              </th>
-              <th style={{ width: 80 }}>
-                Тип
-                <input className={styles.input} style={{ width: "97%" }}
-                  placeholder="Фильтр..." value={filters.data_type}
-                  onChange={e => handleFilterChange("data_type", e.target.value)}
-                  onKeyDown={handleFilterKeyDown}
-                />
-              </th>
-              <th style={{ minWidth: 210, maxWidth: 350 }}>
-                Путь
-                <input className={styles.input} style={{ width: "98%" }}
-                  placeholder="Фильтр..." value={filters.path}
-                  onChange={e => handleFilterChange("path", e.target.value)}
-                  onKeyDown={handleFilterKeyDown}
-                />
-              </th>
+              <th style={{ minWidth: 80, maxWidth: 140 }}>Имя</th>
+              <th style={{ minWidth: 150, maxWidth: 310 }}>Node ID</th>
+              <th style={{ width: 80 }}>Тип</th>
+              <th style={{ minWidth: 210, maxWidth: 350 }}>Путь</th>
               <th style={{ width: 90 }}>Значение</th>
-              <th style={{ width: 110 }}>Время</th>
+              <th style={{ width: 150 }}>Дата/Время</th>
               <th style={{ width: 200 }}>Описание</th>
               <th style={{ width: 60 }}></th>
             </tr>
@@ -440,23 +449,38 @@ async function handleStartPolling() {
                     }}
                   />
                 </td>
-                <td style={{ maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tag.browse_name}</td>
-                <td style={{ maxWidth: 300, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tag.node_id}</td>
+                <td style={{
+                  maxWidth: 140,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }}>{tag.browse_name}</td>
+                <td style={{
+                  maxWidth: 300,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }}>{tag.node_id}</td>
                 <td>{tag.data_type}</td>
-                <td style={{ maxWidth: 350, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tag.path}</td>
+                <td style={{
+                  maxWidth: 350,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }}>{tag.path}</td>
                 {/* Значение */}
                 <td style={{ color: "#22938e", fontWeight: 600, fontFamily: "monospace" }}>
                   {liveValues[tag.id] !== undefined && liveValues[tag.id] !== null
                     ? (typeof liveValues[tag.id].value === "number"
-                        ? liveValues[tag.id].value.toFixed(2)
-                        : String(liveValues[tag.id].value))
+                      ? liveValues[tag.id].value.toFixed(2)
+                      : String(liveValues[tag.id].value))
                     : <span style={{ color: "#aaa" }}>–</span>
                   }
                 </td>
-                {/* Время */}
+                {/* Дата/Время */}
                 <td style={{ color: "#aaa", fontSize: 12 }}>
                   {liveValues[tag.id] && liveValues[tag.id].timestamp
-                    ? new Date(liveValues[tag.id].timestamp).toLocaleTimeString()
+                    ? new Date(liveValues[tag.id].timestamp).toLocaleString()
                     : ""}
                 </td>
                 <td>
@@ -509,7 +533,8 @@ async function handleStartPolling() {
       {loading && <div style={{ color: "#19acac", margin: "18px 0" }}>Загрузка...</div>}
     </div>
   );
-  
+
+
 };
 
 export default OpcTagsPage;

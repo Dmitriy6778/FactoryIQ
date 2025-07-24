@@ -1,7 +1,8 @@
 #main.py
 from fastapi import FastAPI
-from .routers import servers, db, tags, polling, analytics, reports
+from .routers import servers, db, tags, polling, analytics, reports, telegram_reports
 from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI(
     title="FactoryIQ API",
@@ -24,6 +25,7 @@ app.include_router(tags.router)
 app.include_router(polling.router)
 app.include_router(analytics.router)
 app.include_router(reports.router)
+app.include_router(telegram_reports.router)
 
 @app.get("/")
 def root():

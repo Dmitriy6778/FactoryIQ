@@ -141,6 +141,67 @@ def get_all_tags(
         total = cursor.fetchone()[0]
     return {"items": tags, "total": total}
 
+# Для страницы OPCtags
+@router.get("/all-tags")
+def get_all_opc_tags(
+    page: int = Query(1, gt=0),
+    page_size: int = Query(100, le=500),
+    browse_name: str = Query("", alias="browse_name"),
+    node_id: str = Query("", alias="node_id"),
+    data_type: str = Query("", alias="data_type"),
+    path: str = Query("", alias="path"),
+    description: str = Query("", alias="description"),
+    server_id: Optional[int] = Query(None),
+):
+    tags = []
+    params = []
+    filters = []
+    if server_id:
+        filters.append("t.ServerId=?")
+        params.append(server_id)
+    if browse_name:
+        filters.append("t.BrowseName LIKE ?")
+        params.append(f"%{browse_name}%")
+    if node_id:
+        filters.append("t.NodeId LIKE ?")
+        params.append(f"%{node_id}%")
+    if data_type:
+        filters.append("t.DataType LIKE ?")
+        params.append(f"%{data_type}%")
+    if path:
+        filters.append("t.Path LIKE ?")
+        params.append(f"%{path}%")
+    if description:
+        filters.append("t.Description LIKE ?")
+        params.append(f"%{description}%")
+
+    where = "WHERE " + " AND ".join(filters) if filters else ""
+    query = f"""
+        SELECT t.Id, t.BrowseName, t.NodeId, t.DataType, t.Description, t.Path
+        FROM OpcTags t
+        {where}
+        ORDER BY t.Id OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+    """
+    params += [(page - 1) * page_size, page_size]
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            tags.append({
+                "id": row[0],
+                "browse_name": row[1],
+                "node_id": row[2],
+                "data_type": row[3],
+                "description": row[4],
+                "path": row[5],
+            })
+        # Get total count for pagination
+        count_query = f"SELECT COUNT(*) FROM OpcTags t {where}"
+        cursor.execute(count_query, params[:-2])
+        total = cursor.fetchone()[0]
+    return {"items": tags, "total": total}
+
 @router.put("/{tag_id}")
 def update_tag_desc(tag_id: int, data: TagDescUpdate):
     with get_db_connection() as conn:

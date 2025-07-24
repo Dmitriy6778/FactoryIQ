@@ -1,3 +1,18 @@
+SET IDENTITY_INSERT OpcTags ON;
+
+INSERT INTO OpcTags (Id, BrowseName, NodeId, DataType, Description, Path, ServerId)
+VALUES
+(1, 'Sunflower_Seed',   'TEST.SUNFLOWER',      '10', 'Входящий подсолнечник',     'Сырье', 1),
+(2, 'Huls',             'TEST.HULS',           '10', 'Луза',                      'Продукция', 1),
+(3, 'Meal',             'TEST.MEAL',           '10', 'Жмых',                      'Продукция', 1),
+(4, 'PressOil',         'TEST.PRESSOIL',       '10', 'Прессовое масло',           'Продукция', 1),
+(5, 'ExtractedOil',     'TEST.EXTRACTEDOIL',   '10', 'Экстракционное масло',      'Продукция', 1),
+(6, 'ToastMeal',        'TEST.TOASTMEAL',      '10', 'Тостированный шрот',        'Продукция', 1),
+(7, 'GranMeal',         'TEST.GRANMEAL',       '10', 'Гранулированный шрот',      'Продукция', 1);
+
+SET IDENTITY_INSERT OpcTags OFF;
+
+
 -- Очистить старые тестовые данные (ОСТОРОЖНО! если таблица общая)
 DELETE FROM OPCData WHERE TagId IN (1,2,3,4,5,6,7);
 SET LANGUAGE us_english;

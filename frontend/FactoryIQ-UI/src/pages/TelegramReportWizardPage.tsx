@@ -61,6 +61,56 @@ const TelegramReportWizardPage: React.FC = () => {
   const [scheduleType, setScheduleType] = useState("daily");
   const [scheduleTime, setScheduleTime] = useState("08:00");
   const [aggregationType, setAggregationType] = useState("avg"); // for hourly
+  const [showAddChannelModal, setShowAddChannelModal] = useState(false);
+  const [newChannelId, setNewChannelId] = useState("");
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newThreadId, setNewThreadId] = useState("");
+  const [sendAsFile, setSendAsFile] = useState(true);
+  const [sendAsText, setSendAsText] = useState(false);
+  const [sendAsChart, setSendAsChart] = useState(false);
+  const [addingChannel, setAddingChannel] = useState(false);
+  const [addChannelError, setAddChannelError] = useState("");
+
+  const handleAddChannel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddingChannel(true);
+    setAddChannelError("");
+    try {
+      const resp = await fetch("http://localhost:8000/telegram/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: newChannelId,
+          channel_name: newChannelName,
+          thread_id: newThreadId ? Number(newThreadId) : null,
+          send_as_file: sendAsFile,
+          send_as_text: sendAsText,
+          send_as_chart: sendAsChart,
+          active: true,
+        }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json();
+        setAddChannelError(data.detail || "Ошибка добавления канала");
+        setAddingChannel(false);
+        return;
+      }
+      // обновить список каналов
+      fetch("http://localhost:8000/telegram/channels")
+        .then((res) => res.json())
+        .then((data) => setChannels(data.channels || []));
+      setShowAddChannelModal(false);
+      setNewChannelId("");
+      setNewChannelName("");
+      setNewThreadId("");
+      setSendAsFile(true);
+      setSendAsText(false);
+      setSendAsChart(false);
+    } catch (e) {
+      setAddChannelError("Сетевая ошибка: " + (e as any)?.message);
+    }
+    setAddingChannel(false);
+  };
 
   useEffect(() => {
     setLoadingTemplates(true);
@@ -86,7 +136,7 @@ const TelegramReportWizardPage: React.FC = () => {
     // Загружаем каналы при переходе на шаг 2
     if (step === 2) {
       setChannelsLoading(true);
-      fetch("http://localhost:8000/reports/channels")
+      fetch("http://localhost:8000/telegram/channels")
         .then((res) => res.json())
         .then((data) => {
           if (data.ok) setChannels(data.channels);
@@ -121,7 +171,7 @@ const TelegramReportWizardPage: React.FC = () => {
       meta.norm_id = null; // или id выбранной нормы
     }
     // Далее делаем POST на /reports/schedule
-    await fetch("http://localhost:8000/reports/schedule", {
+    await fetch("http://localhost:8000/telegram/schedule", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -207,6 +257,63 @@ const TelegramReportWizardPage: React.FC = () => {
 
   return (
     <div className={styles.startPage}>
+      {/* === МОДАЛЬНОЕ ОКНО ДОБАВЛЕНИЯ КАНАЛА === */}
+      {showAddChannelModal && (
+        <div className={styles.modalBackdrop}>
+          <div className={styles.modal}>
+            <h2>Добавить Telegram-канал/топик</h2>
+            <form onSubmit={handleAddChannel}>
+              <label>ID канала/чата (например, -100...)</label>
+              <input
+                type="text"
+                value={newChannelId}
+                onChange={e => setNewChannelId(e.target.value)}
+                required
+                style={{ width: "100%", marginBottom: 6 }}
+              />
+              <label>Название (для удобства)</label>
+              <input
+                type="text"
+                value={newChannelName}
+                onChange={e => setNewChannelName(e.target.value)}
+                style={{ width: "100%", marginBottom: 6 }}
+              />
+              <label>ID топика (если нужно, иначе оставьте пустым)</label>
+              <input
+                type="number"
+                value={newThreadId}
+                onChange={e => setNewThreadId(e.target.value)}
+                placeholder="Например: 2"
+                style={{ width: "100%", marginBottom: 10 }}
+              />
+              <div style={{ margin: "12px 0", fontSize: 15 }}>
+                <label>
+                  <input type="checkbox" checked={sendAsFile} onChange={e => setSendAsFile(e.target.checked)} />
+                  <span style={{ marginLeft: 6 }}>Отправлять файлом</span>
+                </label>
+                <label style={{ marginLeft: 20 }}>
+                  <input type="checkbox" checked={sendAsText} onChange={e => setSendAsText(e.target.checked)} />
+                  <span style={{ marginLeft: 6 }}>Как текст</span>
+                </label>
+                <label style={{ marginLeft: 20 }}>
+                  <input type="checkbox" checked={sendAsChart} onChange={e => setSendAsChart(e.target.checked)} />
+                  <span style={{ marginLeft: 6 }}>График</span>
+                </label>
+              </div>
+              {addChannelError && <div style={{ color: "red", marginBottom: 6 }}>{addChannelError}</div>}
+              <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                <button type="submit" className={styles.bigBtn} disabled={addingChannel}>
+                  {addingChannel ? "Добавление..." : "Добавить"}
+                </button>
+                <button type="button" className={styles.miniBtn} onClick={() => setShowAddChannelModal(false)}>
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className={styles.centerWrapper}>
         <div className={styles.card}>
           <BackButton />
@@ -285,11 +392,10 @@ const TelegramReportWizardPage: React.FC = () => {
                       {templates.map((tpl) => (
                         <div
                           key={tpl.id}
-                          className={`${styles.templateItem} ${
-                            selectedTemplate === tpl.id
-                              ? styles.activeTemplate
-                              : ""
-                          }`}
+                          className={`${styles.templateItem} ${selectedTemplate === tpl.id
+                            ? styles.activeTemplate
+                            : ""
+                            }`}
                           onClick={() => handleSelectTemplate(tpl.id)}
                         >
                           <b>{tpl.name}</b>
@@ -332,18 +438,16 @@ const TelegramReportWizardPage: React.FC = () => {
                         </div>
                       ) : channels.length === 0 ? (
                         <div style={{ color: "#fa4a4a", padding: "14px" }}>
-                          Нет добавленных каналов. <br /> Используйте "+
-                          Добавить канал".
+                          Нет добавленных каналов. <br /> Используйте "+ Добавить канал".
                         </div>
                       ) : (
                         channels.map((ch) => (
                           <div
                             key={ch.id}
-                            className={`${styles.templateItem} ${
-                              selectedChannel === ch.channel_id
-                                ? styles.activeTemplate
-                                : ""
-                            }`}
+                            className={`${styles.templateItem} ${selectedChannel === ch.channel_id
+                              ? styles.activeTemplate
+                              : ""
+                              }`}
                             onClick={() => handleSelectChannel(ch.channel_id)}
                           >
                             <b>{ch.channel_name || ch.channel_id}</b>
@@ -358,6 +462,7 @@ const TelegramReportWizardPage: React.FC = () => {
                         type="button"
                         className={styles.miniBtn}
                         style={{ marginTop: 10 }}
+                        onClick={() => setShowAddChannelModal(true)}
                       >
                         <Plus size={20} /> Добавить канал
                       </button>
@@ -417,23 +522,6 @@ const TelegramReportWizardPage: React.FC = () => {
                             08:00&nbsp;и&nbsp;20:00
                           </span>
                         </label>
-                        {/* Можно сделать редактируемым! */}
-                        {/* 
-        <input
-          type="time"
-          className={styles.input}
-          value={shiftTimes[0]}
-          onChange={e => setShiftTimes([e.target.value, shiftTimes[1]])}
-          style={{ width: 110, marginRight: 8 }}
-        />
-        <input
-          type="time"
-          className={styles.input}
-          value={shiftTimes[1]}
-          onChange={e => setShiftTimes([shiftTimes[0], e.target.value])}
-          style={{ width: 110 }}
-        />
-        */}
                         <div
                           style={{
                             fontSize: 13,
@@ -474,8 +562,7 @@ const TelegramReportWizardPage: React.FC = () => {
                             fontSize: 15,
                           }}
                         >
-                          Отчёт будет отправлен только при выходе значения за
-                          норму!
+                          Отчёт будет отправлен только при выходе значения за норму!
                         </span>
                         <button
                           className={styles.miniBtn}
@@ -509,11 +596,10 @@ const TelegramReportWizardPage: React.FC = () => {
                       {mockFormats.map((fmt) => (
                         <div
                           key={fmt.value}
-                          className={`${styles.templateItem} ${
-                            selectedFormat === fmt.value
-                              ? styles.activeTemplate
-                              : ""
-                          }`}
+                          className={`${styles.templateItem} ${selectedFormat === fmt.value
+                            ? styles.activeTemplate
+                            : ""
+                            }`}
                           onClick={() => handleSelectFormat(fmt.value)}
                         >
                           <b>{fmt.label}</b>
@@ -638,6 +724,7 @@ const TelegramReportWizardPage: React.FC = () => {
       </div>
     </div>
   );
+
 };
 
 export default TelegramReportWizardPage;

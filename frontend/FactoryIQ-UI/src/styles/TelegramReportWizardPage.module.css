@@ -7,14 +7,16 @@
 }
 
 .centerWrapper {
-  max-width: 1620px;        /* Было 1100px — стало шире */
+  max-width: 1620px;
+  /* Было 1100px — стало шире */
   margin: 0 auto;
   padding: 0 12px;
 }
 
 .card {
   background: #fff;
-  border-radius: 28px;      /* чуть больше для эффекта */
+  border-radius: 28px;
+  /* чуть больше для эффекта */
   box-shadow: 0 6px 42px #60baff19, 0 2px 12px #84b7ff12;
   padding: 44px 44px 58px 44px;
 }
@@ -29,8 +31,10 @@
 
 .mainGrid3col {
   display: grid;
-  grid-template-columns: 440px 1.5fr 370px;  /* Увеличили в 2+ раза левую колонку */
-  gap: 56px;        /* Больше воздуха между колонками */
+  grid-template-columns: 440px 1.5fr 370px;
+  /* Увеличили в 2+ раза левую колонку */
+  gap: 56px;
+  /* Больше воздуха между колонками */
   margin-top: 36px;
 }
 
@@ -55,11 +59,12 @@
   margin-bottom: 34px;
   overflow: hidden;
 }
+
 .progressInner {
   height: 100%;
   background: linear-gradient(90deg, #00ffea, #13e0ff, #2fa3ff);
   border-radius: 8px;
-  transition: width 0.6s cubic-bezier(.5,2,.5,1);
+  transition: width 0.6s cubic-bezier(.5, 2, .5, 1);
 }
 
 .stepsList {
@@ -67,6 +72,7 @@
   margin: 0;
   padding: 0;
 }
+
 .stepItem {
   display: flex;
   align-items: flex-start;
@@ -80,6 +86,7 @@
   border-radius: 12px;
   margin-bottom: 2px;
 }
+
 .stepItem:hover,
 .stepItem.active {
   background: #00314438;
@@ -87,6 +94,7 @@
   border-left: 4px solid #00ffe7;
   font-weight: 500;
 }
+
 .stepItem.done {
   color: #80ffd7;
   font-weight: 600;
@@ -120,12 +128,14 @@
   width: 33px;
   height: 33px;
 }
+
 .stepLabel {
   font-size: 1.12rem;
   font-weight: 600;
   color: #fff;
   margin-bottom: 2px;
 }
+
 .stepDesc {
   font-size: 1.01rem;
   color: #84c9f9;
@@ -162,6 +172,7 @@
   border: 2.2px solid transparent;
   font-size: 1.11rem;
 }
+
 .templateItem:hover,
 .activeTemplate {
   background: linear-gradient(93deg, #00fff3 0%, #e1f3ff 85%);
@@ -169,6 +180,7 @@
   box-shadow: 0 3px 16px #62e6fe2c;
   font-weight: 600;
 }
+
 .templateDesc {
   font-size: 1.01rem;
   color: #5f7c97;
@@ -181,6 +193,7 @@
   flex-direction: column;
   gap: 7px;
 }
+
 .input {
   border: 1.3px solid #c8e3f9;
   border-radius: 9px;
@@ -190,6 +203,7 @@
   margin-top: 4px;
   transition: border 0.16s;
 }
+
 .input:focus {
   outline: none;
   border: 1.7px solid #36ecfa;
@@ -214,9 +228,11 @@
   padding: 17px 44px;
   margin-top: 2px;
 }
+
 .bigBtn:active {
   background: #13b8ee;
 }
+
 .bigBtn.disabled,
 .bigBtn:disabled {
   opacity: 0.57;
@@ -235,6 +251,7 @@
   box-shadow: none;
   margin-bottom: 3px;
 }
+
 .miniBtn:active {
   background: #c5f7fc;
 }
@@ -252,6 +269,7 @@
   text-align: right;
   padding: 6px 0 18px 0;
 }
+
 .logo {
   max-width: 150px;
   height: auto;
@@ -270,10 +288,12 @@
   .centerWrapper {
     max-width: 1100px;
   }
+
   .mainGrid3col {
     grid-template-columns: 350px 1fr 260px;
     gap: 24px;
   }
+
   .stepsColumn {
     min-height: 540px;
     padding: 20px 10px 24px 14px;
@@ -285,11 +305,13 @@
     grid-template-columns: 1fr;
     gap: 18px;
   }
+
   .stepsColumn {
     min-height: unset;
     margin-bottom: 24px;
     width: 100%;
   }
+
   .buttonsColumn {
     margin-top: 24px;
   }
@@ -299,10 +321,144 @@
   .card {
     padding: 10px 2vw 20px 2vw;
   }
+
   .mainGrid3col {
     gap: 8px;
   }
+
   .stepsColumn {
     border-radius: 10px;
+  }
+}
+
+/* === Модальное окно добавления канала === */
+.modalBackdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1200;
+  background: rgba(32, 65, 114, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modalFadeIn 0.18s;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  background: #fff;
+  border-radius: 19px;
+  box-shadow: 0 8px 40px #28b9f124, 0 3px 20px #4ec2ff13;
+  padding: 38px 32px 30px 32px;
+  max-width: 440px;
+  width: 98vw;
+  min-width: 290px;
+  animation: modalZoom 0.22s cubic-bezier(.45, 1.4, .5, 1);
+}
+
+@keyframes modalZoom {
+  from {
+    transform: scale(0.96);
+    opacity: 0.7;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.modal h2 {
+  font-size: 1.35rem;
+  color: #088dbb;
+  margin-bottom: 18px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.modal label {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: #2690c1;
+  margin-bottom: 2px;
+  margin-top: 10px;
+}
+
+.modal input[type="text"],
+.modal input[type="number"] {
+  width: 100%;
+  border: 1.4px solid #d2eafd;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 2px;
+  font-size: 1.13rem;
+  background: #f7fdff;
+  transition: border 0.13s, background 0.13s;
+}
+
+.modal input[type="text"]:focus,
+.modal input[type="number"]:focus {
+  outline: none;
+  border-color: #1feaf3;
+  background: #e2f8ff;
+}
+
+.modal .miniBtn,
+.modal .bigBtn {
+  padding: 13px 26px;
+  font-size: 1.06rem;
+  font-weight: 600;
+  border-radius: 9px;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+.modal .miniBtn {
+  background: #eaf9ff;
+  color: #12c4e4;
+  border: 1.6px solid #74e8f8;
+}
+
+.modal .miniBtn:active {
+  background: #c6f7ff;
+}
+
+.modal .bigBtn {
+  background: linear-gradient(93deg, #00ffe2 0%, #30b9ff 95%);
+  color: #fff;
+  border: none;
+  margin-left: 0;
+  transition: background 0.13s;
+}
+
+.modal .bigBtn:active {
+  background: #20c3eb;
+}
+
+.modal .modalError {
+  color: #e44d5e;
+  font-weight: 500;
+  margin-bottom: 4px;
+  margin-top: 6px;
+  font-size: 1.08rem;
+}
+
+@media (max-width: 650px) {
+  .modal {
+    padding: 18px 4vw 15px 4vw;
+    min-width: unset;
+    max-width: 98vw;
   }
 }

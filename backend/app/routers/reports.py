@@ -44,13 +44,6 @@ class ReportBuildRequest(BaseModel):
     date_to: str
     export_format: Optional[str] = "table"
 
-class ReportScheduleCreate(BaseModel):
-    template_id: int
-    period_type: str
-    time_of_day: str
-    target_type: str
-    target_value: str
-
 class CustomTagConfig(BaseModel):
     tag_id: int
     aggregate: Optional[str] = None
@@ -174,24 +167,6 @@ def delete_report_template(template_id: int):
         raise HTTPException(status_code=500, detail=str(ex))
 
 
-# 6. Запланировать автоотчёт (расписание)
-@router.post("/schedule")
-def create_report_schedule(payload: ReportScheduleCreate):
-    """
-    Создать расписание автосоздания/рассылки отчёта.
-    """
-    try:
-        conn = pyodbc.connect(get_conn_str())
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO ReportSchedule (TemplateId, PeriodType, TimeOfDay, TargetType, TargetValue, Active)
-            VALUES (?, ?, ?, ?, ?, 1)
-        """, payload.template_id, payload.period_type, payload.time_of_day, payload.target_type, payload.target_value)
-        conn.commit()
-        return {"ok": True}
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=str(ex))
-
 # 7. Получить историю построенных отчётов
 @router.get("/history")
 def get_reports_history(limit: int = 50):
@@ -297,31 +272,3 @@ def build_custom_report(payload: CustomReportBuildRequest):
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
-@router.get("/channels")
-def get_telegram_channels():
-    """
-    Получить все Telegram-каналы для отправки отчетов
-    """
-    try:
-        conn = pyodbc.connect(get_conn_str())
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT Id, ChannelId, ChannelName, ThreadId, SendAsFile, SendAsText, SendAsChart, Active
-            FROM TelegramReportTarget
-            WHERE Active = 1
-        """)
-        channels = []
-        for row in cursor.fetchall():
-            channels.append({
-                "id": row.Id,
-                "channel_id": row.ChannelId,
-                "channel_name": row.ChannelName,
-                "thread_id": row.ThreadId,
-                "send_as_file": bool(row.SendAsFile),
-                "send_as_text": bool(row.SendAsText),
-                "send_as_chart": bool(row.SendAsChart),
-                "active": bool(row.Active),
-            })
-        return {"ok": True, "channels": channels}
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=str(ex))

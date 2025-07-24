@@ -81,3 +81,27 @@ def get_aggregated_stats(
             })
     return {"ok": True, "items": results}
 
+@router.get("/avg-trend")
+def get_avg_trend(
+    tag_id: int = Query(...),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    interval_minutes: int = Query(10)
+):
+    items = []
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Можно вызывать процедуру sp_GetCustomReport с одним тегом и нужным интервалом!
+        import json
+        tags_json = json.dumps([{
+            "tag_id": tag_id,
+            "aggregate": "AVG",
+            "interval_minutes": interval_minutes
+        }])
+        cursor.execute("EXEC sp_GetCustomReport ?, ?, ?", date_from, date_to, tags_json)
+        for row in cursor.fetchall():
+            items.append({
+                "timestamp": row.TimeGroup,
+                "value": row.Value
+            })
+    return {"ok": True, "items": items}

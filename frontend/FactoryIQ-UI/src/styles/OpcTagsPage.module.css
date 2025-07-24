@@ -135,3 +135,46 @@
         transform: translateY(0);
     }
 }
+
+.tableFilters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #eafaff;
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    border-bottom: 1.3px solid #d2e6ef;
+    padding: 10px 12px 8px 12px;
+    margin-bottom: 0;
+    min-height: 44px;
+}
+
+.tableFilters .input {
+    width: 85px;
+    max-width: 120px;
+    padding: 7px 8px;
+    font-size: 1.05rem;
+    border-radius: 7px;
+}
+
+.tableFilters .input:nth-child(2) {
+    width: 140px;
+}
+
+.tableFilters .input:nth-child(3) {
+    width: 75px;
+}
+
+.tableFilters .input:nth-child(4) {
+    width: 180px;
+}
+
+.tableFilters .input:nth-child(5) {
+    width: 120px;
+}
+
+.filtersInfo {
+    color: #a7b9ca;
+    font-size: 13px;
+    margin-left: auto;
+}
