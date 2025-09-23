@@ -1,0 +1,46 @@
+.page {
+    max-width: 1320px;
+    margin: 36px auto 30px auto;
+    background: #fafdff66;
+    border-radius: 28px;
+    box-shadow: 0 2px 24px 0 #d4fcf7cc;
+    padding: 28px 32px 36px 32px;
+    min-height: 82vh;
+    transition: box-shadow 0.15s, background 0.2s;
+    font-family: 'Montserrat', Arial, sans-serif;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #15344d;
+    margin-bottom: 22px;
+    letter-spacing: 0.03em;
+}
+
+
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.tableBlock {
+    margin: 0 auto;
+    background: #fafdffcc;
+    border-radius: 18px;
+    box-shadow: 0 2px 24px 0 #229ed922;
+    padding: 28px 18px 12px 18px;
+    min-width: 930px;
+    min-height: 320px;
+    overflow-x: auto;
+}
+
+.gray {
+    color: #b0b0b0;
+    font-style: italic;
+}

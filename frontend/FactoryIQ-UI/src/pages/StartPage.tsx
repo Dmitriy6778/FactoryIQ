@@ -9,6 +9,7 @@ import {
   Settings,
   ActivitySquare,
   BarChart2,
+  FileText,
 } from "lucide-react"; // или любые другие иконки
 
 const StartPage: React.FC = () => {
@@ -65,11 +66,13 @@ const StartPage: React.FC = () => {
           </button>
           <button
             className={styles.menuBtn}
-            onClick={() => navigate("/telegram-reports")}
+            onClick={() => navigate("/tg-reports")}
           >
-            <Settings size={28} /> Отчёты TELEGRAM
+            <FileText size={28} /> Созданные отчёты TELEGRAM
           </button>
+
         </div>
+
         {/* Футер с авторством и названием компании */}
         <div className={styles.footer}>
           <div className={styles.footerContent}>

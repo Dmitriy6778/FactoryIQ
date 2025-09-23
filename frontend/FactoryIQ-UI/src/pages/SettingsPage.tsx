@@ -78,7 +78,7 @@ const StartPage: React.FC = () => {
     }
     setIsLoading(false);
   };
-  
+
   const fetchSqlInstances = async () => {
     setServers([]);
     try {
@@ -229,7 +229,6 @@ const StartPage: React.FC = () => {
     window.location.href = "/opc-servers";
   };
 
-  // Остальная часть JSX ниже...
 
   return (
     <div className={styles.startPage}>
@@ -243,7 +242,7 @@ const StartPage: React.FC = () => {
           <div className={styles.subtitle}>
             Промышленная платформа нового поколения для сбора, анализа и
             визуализации данных
-            <br />с OPC UA и других источников
+            <br />с OPC UA
           </div>
           <div className={styles.mainGrid3col}>
             {/* 1. Левая колонка — шаги */}
@@ -291,7 +290,6 @@ const StartPage: React.FC = () => {
                 </ul>
               </div>
             </div>
-            {/* 2. Средняя колонка — поля формы */}
             {/* 2. Средняя колонка — поля формы */}
             <div className={styles.formColumn}>
               <form
@@ -450,9 +448,8 @@ const StartPage: React.FC = () => {
             <div className={styles.buttonsColumn}>
               <div className={styles.stepBtnsRow}>
                 <button
-                  className={`${styles.bigBtn} ${
-                    step !== 1 ? styles.disabled : ""
-                  }`}
+                  className={`${styles.bigBtn} ${step !== 1 ? styles.disabled : ""
+                    }`}
                   type="button"
                   onClick={initFullWindowsAuth}
                   disabled={isLoading || step !== 1}
@@ -464,9 +461,8 @@ const StartPage: React.FC = () => {
                   )}
                 </button>
                 <button
-                  className={`${styles.bigBtn} ${
-                    step !== 2 ? styles.disabled : ""
-                  }`}
+                  className={`${styles.bigBtn} ${step !== 2 ? styles.disabled : ""
+                    }`}
                   type="button"
                   onClick={checkConnection}
                   disabled={isLoading || step !== 2}
@@ -478,9 +474,8 @@ const StartPage: React.FC = () => {
                   )}
                 </button>
                 <button
-                  className={`${styles.bigBtn} ${
-                    step !== 3 ? styles.disabled : ""
-                  }`}
+                  className={`${styles.bigBtn} ${step !== 3 ? styles.disabled : ""
+                    }`}
                   type="button"
                   onClick={initDb}
                   disabled={isLoading || step !== 3}
@@ -492,9 +487,8 @@ const StartPage: React.FC = () => {
                   )}
                 </button>
                 <button
-                  className={`${styles.bigBtn} ${
-                    step !== 4 ? styles.disabled : ""
-                  }`}
+                  className={`${styles.bigBtn} ${step !== 4 ? styles.disabled : ""
+                    }`}
                   type="button"
                   onClick={saveConfig}
                   disabled={isLoading || step !== 4}
@@ -506,22 +500,21 @@ const StartPage: React.FC = () => {
                   )}
                 </button>
                 <button
-  className={`${styles.bigBtn} ${step !== 5 ? styles.disabled : ""}`}
-  type="button"
-  onClick={generateCerts}
-  disabled={isLoading || step !== 5}
->
-  {isLoading && step === 5 ? (
-    <Loader className={styles.loader} />
-  ) : (
-    "Сгенерировать сертификаты"
-  )}
-</button>
+                  className={`${styles.bigBtn} ${step !== 5 ? styles.disabled : ""}`}
+                  type="button"
+                  onClick={generateCerts}
+                  disabled={isLoading || step !== 5}
+                >
+                  {isLoading && step === 5 ? (
+                    <Loader className={styles.loader} />
+                  ) : (
+                    "Сгенерировать сертификаты"
+                  )}
+                </button>
 
                 <button
-                  className={`${styles.bigBtn} ${
-                    step !== 6 ? styles.disabled : ""
-                  }`}
+                  className={`${styles.bigBtn} ${step !== 6 ? styles.disabled : ""
+                    }`}
                   type="button"
                   onClick={goToServers}
                   disabled={step !== 6}

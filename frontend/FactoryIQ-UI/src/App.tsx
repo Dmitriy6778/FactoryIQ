@@ -8,6 +8,7 @@ import StartPage from "./pages/StartPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import CreateReportPage from "./pages/CreateReportPage"; // Если нужно, раскомментируй
 import TelegramReportWizardPage from "./pages/TelegramReportWizardPage";
+import ScheduleTable from "./pages/ScheduleTable";
 const App: React.FC = () => (
   <BrowserRouter>
     <Routes>
@@ -21,6 +22,8 @@ const App: React.FC = () => (
       <Route path="/polling-tasks" element={<PollingTasksPage />} />
       <Route path="/opc-tags" element={<OpcTagsPage />} />
       <Route path="/telegram-reports" element={<TelegramReportWizardPage />} />
+      <Route path="/tg-reports" element={<ScheduleTable />} />
+
       {/* Здесь можешь добавить другие страницы, например */}
       {/* <Route path="/settings" element={<SettingsPage />} /> */}
     </Routes>
