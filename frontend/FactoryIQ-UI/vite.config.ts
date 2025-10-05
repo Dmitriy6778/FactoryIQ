@@ -1,37 +1,34 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
+// vite.config.ts
+import { defineConfig, type Plugin } from 'vite';
+import react from '@vitejs/plugin-react';
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
+function fixRcUtilReactVersion(): Plugin {
+  return {
+    name: 'fix-rc-util-react-version',
+    enforce: 'pre', // ← литерал, не string
+    transform(code, id) {
+      const isRef =
+        ((id.includes('/rc-util/') || id.includes('\\rc-util\\')) &&
+          (id.endsWith('/ref.js') || id.endsWith('\\ref.js')));
+
+      if (isRef && code.includes('version.split')) {
+        const patched = code
+          // ESM вариант: import { version } from 'react'
+          .replace(/Number\(\s*version\.split\([^)]*\)\[0\]\s*\)/g, '19')
+          // CJS вариант: var ReactMajorVersion = Number(_react.version.split(...)[0])
+          .replace(/Number\(\s*_react\.version\.split\([^)]*\)\[0\]\s*\)/g, '19');
+
+        return { code: patched, map: null };
+      }
+      return null;
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      react: resolve(__dirname, 'src/compat/react-shim.js'),
-      'react/jsx-runtime': 'react/jsx-runtime'
-    }
-  },
+  plugins: [react(), fixRcUtilReactVersion()],
   build: {
-    sourcemap: true,
+    sourcemap: false,
     chunkSizeWarningLimit: 2000,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react')) return 'react'
-            if (id.includes('antd')) return 'antd'
-            if (id.includes('xlsx')) return 'xlsx'
-            if (id.includes('file-saver')) return 'filesaver'
-            if (id.includes('dayjs')) return 'dayjs'
-            if (id.includes('react-router-dom')) return 'router'
-            if (id.includes('react-toastify')) return 'toastify'
-            return 'vendor'
-          }
-        }
-      }
-    }
-  }
-})
+  },
+});

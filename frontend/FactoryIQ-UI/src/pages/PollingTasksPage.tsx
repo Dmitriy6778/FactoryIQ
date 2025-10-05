@@ -27,7 +27,6 @@ type PollingInterval = {
   type: string;
 };
 
-
 const API = "http://localhost:8000/polling/polling-tasks";
 
 const PollingTasksPage: React.FC = () => {
@@ -43,7 +42,6 @@ const PollingTasksPage: React.FC = () => {
     setIntervals(data.items || []);
   };
 
-
   // Получить список задач
   const fetchTasks = async () => {
     setLoading(true);
@@ -57,7 +55,6 @@ const PollingTasksPage: React.FC = () => {
     setTasks(fixedTasks);
     setLoading(false);
   };
-
 
   useEffect(() => {
     fetchIntervals();
@@ -93,8 +90,6 @@ const PollingTasksPage: React.FC = () => {
     fetchTasks();
   };
 
-
-
   const stopAll = async () => {
     await fetch("http://localhost:8000/polling/stop_all", { method: "POST" });
     fetchTasks();
@@ -126,8 +121,22 @@ const PollingTasksPage: React.FC = () => {
           <span className={styles.iconMain}>
             <svg width="27" height="27" viewBox="0 0 26 26" fill="none">
               <rect x="3" y="6" width="6" height="14" rx="2.5" fill="#00ffc6" />
-              <rect x="11" y="2" width="6" height="18" rx="2.5" fill="#34c6ff" />
-              <rect x="19" y="10" width="6" height="10" rx="2.5" fill="#11e7f4" />
+              <rect
+                x="11"
+                y="2"
+                width="6"
+                height="18"
+                rx="2.5"
+                fill="#34c6ff"
+              />
+              <rect
+                x="19"
+                y="10"
+                width="6"
+                height="10"
+                rx="2.5"
+                fill="#11e7f4"
+              />
             </svg>
           </span>
           Мониторинг задач опроса OPC UA
@@ -192,10 +201,12 @@ const PollingTasksPage: React.FC = () => {
                     <select
                       className={styles.select}
                       value={task.interval_id}
-                      onChange={e => changeInterval(task.id, Number(e.target.value))}
+                      onChange={(e) =>
+                        changeInterval(task.id, Number(e.target.value))
+                      }
                       disabled={!task.is_active}
                     >
-                      {intervals.map(iv => (
+                      {intervals.map((iv) => (
                         <option key={iv.id} value={iv.id}>
                           {iv.name} ({iv.interval_seconds}s)
                         </option>
@@ -203,23 +214,39 @@ const PollingTasksPage: React.FC = () => {
                     </select>
                   </td>
                   <td>
-                    <button className={styles.btnMini} onClick={() => handleShowTags(task.id)}>
-                      {expandedTaskId === task.id ? "Скрыть" : "Показать"} <b>({task.tags.length})</b>
+                    <button
+                      className={styles.btnMini}
+                      onClick={() => handleShowTags(task.id)}
+                    >
+                      {expandedTaskId === task.id ? "Скрыть" : "Показать"}{" "}
+                      <b>({task.tags.length})</b>
                     </button>
                   </td>
                   <td>{task.started_at?.replace("T", " ").slice(0, 19)}</td>
                   <td>
-                    <span className={task.is_active ? `${styles.status} ${styles.active}` : `${styles.status} ${styles.stopped}`}>
+                    <span
+                      className={
+                        task.is_active
+                          ? `${styles.status} ${styles.active}`
+                          : `${styles.status} ${styles.stopped}`
+                      }
+                    >
                       {task.is_active ? "Активна" : "Остановлена"}
                     </span>
                   </td>
                   <td className={styles.actionBtns}>
                     {task.is_active ? (
-                      <button className={styles.btnMini} onClick={() => stopTask(task.id)}>
+                      <button
+                        className={styles.btnMini}
+                        onClick={() => stopTask(task.id)}
+                      >
                         ⏹️ Остановить
                       </button>
                     ) : (
-                      <button className={styles.btnMini} onClick={() => startTask(task.id)}>
+                      <button
+                        className={styles.btnMini}
+                        onClick={() => startTask(task.id)}
+                      >
                         ▶️ Запустить
                       </button>
                     )}
@@ -241,11 +268,12 @@ const PollingTasksPage: React.FC = () => {
                           <div style={{ color: "#888" }}>Нет тегов</div>
                         ) : (
                           <ul className={styles.tagList}>
-                            {task.tags.map(t => (
+                            {task.tags.map((t) => (
                               <li key={t.id}>
                                 <b>{t.browse_name}</b>{" "}
                                 <span style={{ color: "#888" }}>
-                                  [{t.node_id}] {t.data_type ? `(${t.data_type})` : ""}
+                                  [{t.node_id}]{" "}
+                                  {t.data_type ? `(${t.data_type})` : ""}
                                 </span>
                               </li>
                             ))}
@@ -262,7 +290,6 @@ const PollingTasksPage: React.FC = () => {
       </div>
     </div>
   );
-
 };
 
 export default PollingTasksPage;

@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from .routers import servers, db, tags, polling, analytics, reports, telegram_reports, telegram_channels
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import report_styles, telegram_reports
+from .routers import report_styles
 from .routers import report_templates
 
 app = FastAPI(
