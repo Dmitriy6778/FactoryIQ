@@ -1,4 +1,4 @@
-/* CreateReportPage.module.css  */
+/* CreateReportPage.module.css  — версия под AltaiMai theme */
 
 /* Центрирование и фон */
 .reportCenterWrapper {
@@ -6,7 +6,7 @@
     justify-content: center;
     align-items: flex-start;
     min-height: 100vh;
-    background: #f7f7fa;
+    background: var(--bg);
     width: 100vw;
 }
 
@@ -16,96 +16,86 @@
     padding: 24px 0;
 }
 
-
+/* Карточка страниц */
 .reportCard {
-    background: #fff;
-    border-radius: 20px;
-    box-shadow: 0 10px 40px rgba(80,130,150,0.13);
-    padding: 2.4rem 2.5rem 2.4rem 2.5rem;
+    composes: card from './theme.module.css';
+    padding: 2.4rem 2.5rem;
     width: 1100px;
     max-width: 99vw;
-    font-family: 'Montserrat', Arial, sans-serif;
+    font-family: var(--font-sans);
     margin: 35px 0;
     position: relative;
 }
 
+/* Заголовки */
 .reportTitle {
     text-align: center;
     font-size: 2.1rem;
-    font-weight: 700;
-    color: #1a2947;
+    font-weight: 800;
+    color: var(--oil-700);
     margin-bottom: 1.3rem;
-    letter-spacing: 1px;
+    letter-spacing: 0.02em;
 }
 
 .reportSectionTitle {
-    font-weight: 600;
-    font-size: 1.21rem;
+    font-weight: 700;
+    font-size: 1.18rem;
     margin-top: 1.3rem;
     margin-bottom: 0.85rem;
-    color: #224b60;
+    color: var(--seed-900);
     letter-spacing: 0.01em;
-    border-left: 4px solid #00ffc6;
+    border-left: 4px solid var(--oil-300);
     padding-left: 0.75rem;
     background: none;
 }
 
 .reportSectionTitleMini {
     font-size: 1.01rem;
-    color: #217b92;
+    color: var(--oil-700);
     margin-bottom: 6px;
-    font-weight: 500;
+    font-weight: 600;
     margin-top: 0.7rem;
 }
 
-/* Инпуты и селекты */
-.reportInput,
-.reportSelect {
-    font-family: inherit;
-    width: 100%;
-    min-width: 0;
-    padding: 0.53rem 0.97rem;
-    border-radius: 7px;
-    border: 1.2px solid #dde2f3;
-    font-size: 1rem;
-    background: #f8fafc;
+/* Инпуты и селекты — тянем базу из темы */
+.reportInput {
+    composes: input from './theme.module.css';
     margin-bottom: 0.07rem;
-    box-sizing: border-box;
     margin-right: 0.55rem;
-    transition: border .18s;
-}
-.reportInput:focus,
-.reportSelect:focus {
-    border: 1.5px solid #00ffc6;
-    outline: none;
+    min-width: 0;
 }
 
-/* Кнопки */
+.reportSelect {
+    composes: input from './theme.module.css';
+    margin-bottom: 0.07rem;
+    margin-right: 0.55rem;
+    min-width: 0;
+    appearance: none;
+}
+
+/* Кнопки — база из темы, модификаторы локально */
 .reportButton {
-    background: linear-gradient(90deg, #00ffc6 0%, #0089fc 100%);
-    color: #172339;
-    border: none;
-    border-radius: 8px;
-    font-family: inherit;
-    font-size: 1.09rem;
-    font-weight: 700;
+    composes: btn from './theme.module.css';
+    font-size: 1.02rem;
     padding: 0.55rem 1.1rem;
-    cursor: pointer;
-    transition: box-shadow 0.18s, background 0.16s;
-    box-shadow: 0 2px 8px #00ffc630;
     margin-right: 0.2rem;
     margin-bottom: 0.09rem;
 }
+
 .reportButton:disabled {
-    opacity: 0.6;
+    opacity: .6;
     filter: grayscale(40%);
     box-shadow: none;
     pointer-events: none;
 }
-.reportButton:not(:disabled):hover {
-    background: linear-gradient(90deg, #b2fff4 0%, #6dbbff 100%);
-    color: #17455f;
-    box-shadow: 0 2px 16px #00ffd28e;
+
+/* Маленькая кнопка — мягкий ghost-стиль из темы */
+.reportSmallBtn {
+    composes: btn btn--ghost from './theme.module.css';
+    font-size: 0.95rem;
+    padding: 0.22rem 0.75rem;
+    margin-right: 3px;
+    margin-bottom: 2px;
 }
 
 /* Выбранные теги */
@@ -117,80 +107,80 @@
     gap: 7px;
     align-items: center;
 }
+
 .reportTagBox {
     display: inline-flex;
     align-items: center;
-    background: #00ffc633;
-    color: #005;
+    background: color-mix(in oklab, var(--oil-300) 25%, transparent);
+    color: var(--seed-900);
     padding: 5px 13px;
-    border-radius: 4px;
+    border-radius: var(--radius-s);
     margin-right: 8px;
     margin-bottom: 2px;
     user-select: none;
     font-size: 1.02rem;
-    font-weight: 500;
+    font-weight: 600;
+    border: 1px solid var(--border-warm);
 }
+
 .reportTagBox span {
     margin-left: 7px;
     cursor: pointer;
-    color: #444;
-    font-weight: bold;
+    color: var(--seed-700);
+    font-weight: 800;
 }
-.reportTagsEmpty { color: #bbb; }
+
+.reportTagsEmpty {
+    color: color-mix(in oklab, var(--seed-900) 45%, #999);
+}
 
 /* Блок настроек тегов */
 .reportSettingsBlock {
-    border: 1px solid #dde2f3;
-    padding: 12px 12px 7px 12px;
+    border: 1px solid var(--border-warm);
+    padding: 12px 12px 7px;
     margin-bottom: 8px;
-    border-radius: 7px;
-    background: #f8fafc;
+    border-radius: var(--radius-s);
+    background: #fffdf7;
+    box-shadow: var(--shadow-warm-s);
 }
+
 .reportSettingsRow {
     margin-top: 7px;
     display: flex;
     gap: 11px;
     flex-wrap: wrap;
 }
+
 .reportSettingsRemove {
     float: right;
 }
-.reportSmallBtn {
-    font-size: 1.07rem;
-    background: linear-gradient(90deg, #f2fffa 0%, #d8f2fa 100%);
-    color: #2376b3;
-    border: none;
-    border-radius: 7px;
-    padding: 0.22rem 0.75rem;
-    cursor: pointer;
-    margin-right: 3px;
-    margin-bottom: 2px;
-    transition: background 0.17s, box-shadow 0.15s;
-    box-shadow: 0 1px 4px #00ffc610;
-}
-.reportSmallBtn:hover {
-    background: linear-gradient(90deg, #aff9e8 0%, #bad8ff 100%);
-    color: #1d475a;
-}
 
-/* Выпадающий список */
+/* Поиск тегов / выпадающий список */
 .tagSearchBlock {
     position: relative;
     max-width: 600px;
     margin-bottom: 8px;
 }
+
 .dropdownList {
     max-height: 180px;
     overflow-y: auto;
-    border: 1px solid #dde2f3;
+    border: 1px solid var(--border-warm);
     background: #fff;
     position: absolute;
     z-index: 1000;
     width: 100%;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.13);
-    top: 100%; left: 0;
+    box-shadow: var(--shadow-warm-s);
+    top: 100%;
+    left: 0;
+    border-radius: var(--radius-s);
 }
-.dropdownEmpty { color: #999; padding: 8px; }
+
+.dropdownEmpty {
+    color: color-mix(in oklab, var(--seed-900) 45%, #999);
+    padding: 8px;
+}
+
 .dropdownItem {
     padding: 8px 12px;
     cursor: pointer;
@@ -201,22 +191,64 @@
     gap: 8px;
     background: #fff;
 }
-.dropdownTagName { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dropdownTagDesc { font-size: 12px; color: #888; margin-left: 10px; text-align: right; max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex-shrink: 1; }
+
+.dropdownItem:hover {
+    background: var(--oil-50);
+}
+
+.dropdownTagName {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--seed-900);
+}
+
+.dropdownTagDesc {
+    font-size: 12px;
+    color: color-mix(in oklab, var(--seed-900) 45%, #888);
+    margin-left: 10px;
+    text-align: right;
+    max-width: 220px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+}
 
 /* Период, сохранение, действия */
-.reportPeriodRow { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
-.reportPeriodLabel { color: #444; }
-.reportSaveRow { display: flex; align-items: center; gap: 9px; margin-bottom: 20px; }
-.reportActionRow { margin-top: 15px; margin-bottom: 22px; }
+.reportPeriodRow {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.reportPeriodLabel {
+    color: var(--seed-700);
+}
+
+.reportSaveRow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 20px;
+}
+
+.reportActionRow {
+    margin-top: 15px;
+    margin-bottom: 22px;
+}
 
 /* Таблица отчёта */
 .reportWideTableBlock {
     overflow-x: auto;
     margin-top: 18px;
-    border-radius: 9px;
-    box-shadow: 0 1px 12px #00ffc619;
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-warm-s);
+    background: var(--paper);
 }
+
 .reportWideTable {
     width: 100%;
     border-collapse: collapse;
@@ -225,6 +257,7 @@
     min-width: 600px;
     margin-bottom: 0.8rem;
 }
+
 .reportWideTable th,
 .reportWideTable td {
     border-bottom: 1px solid #e6eef8;
@@ -232,46 +265,62 @@
     text-align: center;
     font-weight: 400;
 }
+
 .reportWideTable th {
     background: #e4f8fd;
-    color: #26758b;
-    font-weight: 600;
-    font-size: 1.08rem;
-    border-bottom: 2.3px solid #a8eceb;
+    color: var(--oil-700);
+    font-weight: 700;
+    font-size: 1.06rem;
+    border-bottom: 2px solid #a8eceb;
 }
+
 .reportWideTable thead tr:first-child th {
     background: #e3fbfa;
     font-size: 1.08rem;
     border-bottom: none;
 }
+
 .reportWideTable thead tr:nth-child(2) th {
     background: #f6fdff;
-    color: #26819c;
+    color: var(--oil-600);
     font-size: 0.98rem;
     border-top: none;
 }
+
 .reportWideTable tr:last-child td {
     border-bottom: none;
 }
+
 .reportWideTable tr:hover {
-    background: #eefcff;
+    background: var(--oil-50);
 }
+
 .reportWideTable td {
     background: #fff;
     font-size: 1.01rem;
     text-align: center;
 }
+
 .reportWideTable td.sumCell {
     background: #e8ffe6 !important;
     color: #19a059 !important;
-    font-weight: bold !important;
+    font-weight: 800 !important;
 }
 
-/* Тайтлы */
-.reportResultTableTitle { margin: 24px 0 7px 0; }
+/* Титры таблиц */
+.reportResultTableTitle {
+    margin: 24px 0 7px;
+    color: var(--seed-900);
+}
 
 /* Адаптивность */
 @media (max-width: 1200px) {
-    .reportCard { width: 99vw; padding: 1.4rem 0.6rem 2rem 0.6rem; }
-    .reportWideTableBlock { min-width: 0; }
+    .reportCard {
+        width: 99vw;
+        padding: 1.4rem 0.6rem 2rem;
+    }
+
+    .reportWideTableBlock {
+        min-width: 0;
+    }
 }

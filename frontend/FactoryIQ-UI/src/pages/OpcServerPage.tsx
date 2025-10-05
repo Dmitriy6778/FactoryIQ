@@ -426,33 +426,17 @@ const OpcServerPage: React.FC = () => {
         <div className={styles.card}>
           <BackButton />
           <h1 className={styles.title}>
-            <Server
-              size={32}
-              style={{
-                verticalAlign: "-7px",
-                marginRight: 10,
-                color: "#18f8f8",
-              }}
-            />
+            <Server size={32} className={styles.titleIcon} />
             OPC UA Серверы
           </h1>
 
+
           {/* --- СВОРРАЧИВАЕМАЯ СЕКЦИЯ: Поиск/добавление OPC UA серверов --- */}
           <div style={{ marginBottom: 18 }}>
-            <div
-              style={{
-                cursor: "pointer",
-                fontWeight: 600,
-                fontSize: 19,
-                userSelect: "none",
-                marginBottom: showAddPanel ? 10 : 0,
-                display: "flex",
-                alignItems: "center"
-              }}
-              onClick={() => setShowAddPanel((v) => !v)}
-            >
+            <div className={styles.foldTitle} onClick={() => setShowAddPanel(v => !v)}>
               {showAddPanel ? "▼" : "►"} Поиск/добавление OPC UA серверов
             </div>
+
             {showAddPanel && (
               <>
                 <div className={styles.sectionTitle}>
@@ -472,11 +456,7 @@ const OpcServerPage: React.FC = () => {
                     onChange={(e) => setIpEnd(e.target.value)}
                     placeholder="Конечный IP"
                   />
-                  <button
-                    className={styles.button}
-                    onClick={startScan}
-                    disabled={isScanning}
-                  >
+                  <button className={styles.btnPrimary} onClick={startScan} disabled={isScanning}>
                     {isScanning ? "Поиск..." : "Искать"}
                   </button>
                 </div>
@@ -492,12 +472,7 @@ const OpcServerPage: React.FC = () => {
                       {foundServers.map((url) => (
                         <li key={url}>
                           <b>{url}</b>
-                          <button
-                            onClick={() => handleBrowse(url)}
-                            className={styles.smallBtn}
-                          >
-                            Обзор
-                          </button>
+                          <button className={styles.btnMini} onClick={() => handleBrowse(url)}>Обзор</button>
                         </li>
                       ))}
                     </ul>
@@ -595,21 +570,14 @@ const OpcServerPage: React.FC = () => {
                       ))
                     )}
                   </select>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      className={styles.iconBtn}
-                      title="Проверить доступность"
-                      onClick={checkServer}
-                    >
+                  <div className={styles.actionsRow}>
+                    <button className={styles.iconBtnSolid} title="Проверить доступность" onClick={checkServer}>
                       <RefreshCw size={20} />
                     </button>
-                    <button
-                      className={styles.iconBtn}
-                      title="Добавить сервер"
-                      onClick={handleAddServer}
-                    >
+                    <button className={styles.iconBtnSolid} title="Добавить сервер" onClick={handleAddServer}>
                       <Plus size={22} />
                     </button>
+
                   </div>
                 </div>
                 {probeResult && <div className={styles.status}>{probeResult}</div>}
@@ -675,32 +643,13 @@ const OpcServerPage: React.FC = () => {
                     <td>{srv.name}</td>
                     <td className={styles.ellipsis}>{srv.endpoint_url}</td>
                     <td>
-                      <button
-                        className={styles.smallBtn}
-                        onClick={() => setEditingServer(srv)}
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        className={styles.smallBtn}
-                        onClick={() => handleDeleteServer(srv.id!)}
-                      >
-                        🗑️
-                      </button>
-                      <button
-                        className={styles.smallBtn}
-                        style={{ color: "#1be4aa" }}
-                        onClick={() => handleScanFullTree(srv)}
-                        title="Создать карту тегов"
-                      >
-                        🗺️
-                      </button>
-                      <button
-                        className={styles.smallBtn}
-                        onClick={() => setSelectedServer(srv)}
-                      >
+                      <button className={styles.btnMini} onClick={() => setEditingServer(srv)}>✏️</button>
+                      <button className={styles.btnMini} onClick={() => handleDeleteServer(srv.id!)}>🗑️</button>
+                      <button className={styles.btnMini} onClick={() => handleScanFullTree(srv)} title="Создать карту тегов">🗺️</button>
+                      <button className={styles.btnMini} onClick={() => setSelectedServer(srv)}>
                         <Search size={16} /> Обзор
                       </button>
+
                     </td>
                   </tr>
                 )
@@ -730,57 +679,43 @@ const OpcServerPage: React.FC = () => {
                   overflow: "auto",
                 }}
               >
-                <Tree
-                  treeData={treeData}
-                  loadData={onLoadData}
-                  showLine
-                  checkable
-                  selectable
-                  checkStrictly={true}
-                  height={550}
-                  virtual
-                  onSelect={(_, info) => {
-                    setSelectedNodeKey(info.node.key);
-                    if (info.node && info.node.data) setSelectedTag(info.node.data);
-                  }}
-                  onCheck={(checked, info) => {
-                    setCheckedKeys(Array.isArray(checked) ? checked : checked.checked);
-                    if (info.node && info.node.key) setSelectedNodeKey(info.node.key);
-                    if (info.node && info.node.data) setSelectedTag(info.node.data);
-                  }}
-                  checkedKeys={checkedKeys}
-                  defaultExpandAll={false}
-                />
-                {selectedTag && (
-                  <div
-                    style={{
-                      marginTop: 20,
-                      background: "#f8f8f8",
-                      padding: 12,
-                      borderRadius: 6,
+                <div className={styles.treePanel}>
+                  <Tree
+                    treeData={treeData}
+                    loadData={onLoadData}
+                    showLine
+                    checkable
+                    selectable
+                    checkStrictly={true}
+                    height={550}
+                    virtual
+                    onSelect={(_, info) => {
+                      setSelectedNodeKey(info.node.key);
+                      if (info.node && info.node.data) setSelectedTag(info.node.data);
                     }}
-                  >
-                    <div>
-                      <b>Имя:</b> {selectedTag.browse_name}
+                    onCheck={(checked, info) => {
+                      setCheckedKeys(Array.isArray(checked) ? checked : checked.checked);
+                      if (info.node && info.node.key) setSelectedNodeKey(info.node.key);
+                      if (info.node && info.node.data) setSelectedTag(info.node.data);
+                    }}
+                    checkedKeys={checkedKeys}
+                    defaultExpandAll={false}
+                  />
+                  {selectedTag && (
+                    <div className={styles.tagInfo}>
+                      <div><b>Имя:</b> {selectedTag.browse_name}</div>
+                      <div><b>Node ID:</b> {selectedTag.node_id}</div>
+                      <div><b>Тип:</b> {selectedTag.node_class}</div>
+                      <div><b>DataType:</b> {selectedTag.data_type}</div>
+                      <div><b>Value:</b> {selectedTag.value ? String(selectedTag.value) : "–"}</div>
                     </div>
-                    <div>
-                      <b>Node ID:</b> {selectedTag.node_id}
-                    </div>
-                    <div>
-                      <b>Тип:</b> {selectedTag.node_class}
-                    </div>
-                    <div>
-                      <b>DataType:</b> {selectedTag.data_type}
-                    </div>
-                    <div>
-                      <b>Value:</b> {selectedTag.value ? String(selectedTag.value) : "–"}
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
+
               </div>
               {/* Кнопки для тегов */}
               <div className={styles.tagBtnsRow}>
-                <button onClick={() => setCheckedKeys([])}>Снять выбор</button>
+                <button className={styles.btnGhost} onClick={() => setCheckedKeys([])}>Снять выбор</button>
               </div>
               <div className={styles.tagBtnsRow}>
                 <select
@@ -815,24 +750,14 @@ const OpcServerPage: React.FC = () => {
           )}
 
           {/* Быстрый переход */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              marginTop: 24,
-            }}
-          >
-            <button
-              className={styles.button}
-              onClick={() => (window.location.href = "/polling-tasks")}
-              title="Перейти к задачам опроса"
-            >
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
+            <button className={styles.btnPrimary} onClick={() => (window.location.href = "/polling-tasks")}>
               🗂 Задачи опроса
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 
 };

@@ -1,35 +1,43 @@
-/* CustomReportTable.module.css */
+/* CustomReportTable.module.css — под AltaiMai theme */
+
 .tableWrapper {
     margin-top: 16px;
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-warm-s);
+    overflow-x: auto;
+    background: var(--paper);
 }
 
+/* Таблица */
 .customReportTable {
     width: 100%;
     border-collapse: collapse;
-    background: #fff;
+    background: var(--paper);
     font-size: 1.01rem;
     min-width: 600px;
     margin-bottom: 0.8rem;
+    font-family: var(--font-sans);
 }
 
 .customReportTable th,
 .customReportTable td {
-    border-bottom: 1px solid #e6eef8;
+    border-bottom: 1px solid var(--border-warm);
     padding: 0.63rem 0.6rem;
     text-align: center;
     font-weight: 400;
 }
 
+/* Заголовки */
 .customReportTable th {
-    background: #e4f8fd;
-    color: #26758b;
-    font-weight: 600;
-    font-size: 1.08rem;
-    border-bottom: 2.3px solid #a8eceb;
+    background: var(--oil-50);
+    color: var(--oil-700);
+    font-weight: 700;
+    font-size: 1.06rem;
+    border-bottom: 2px solid var(--oil-300);
 }
 
 .customReportTable thead tr:first-child th {
-    background: #e3fbfa;
+    background: var(--oil-100);
     font-size: 1.08rem;
     border-bottom: none;
 }
@@ -38,12 +46,13 @@
     border-bottom: none;
 }
 
+/* Ховер */
 .customReportTable tr:hover {
-    background: #eefcff;
+    background: var(--oil-50);
 }
 
 .customReportTable td {
-    background: #fff;
+    background: var(--paper);
     font-size: 1.01rem;
     text-align: center;
 }

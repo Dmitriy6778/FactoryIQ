@@ -1,13 +1,14 @@
 #main.py
 from fastapi import FastAPI
-from .routers import servers, db, tags, polling, analytics, reports, telegram_reports
+from .routers import servers, db, tags, polling, analytics, reports, telegram_reports, telegram_channels
 from fastapi.middleware.cors import CORSMiddleware
-
+from .routers import report_styles, telegram_reports
+from .routers import report_templates
 
 app = FastAPI(
     title="FactoryIQ API",
     description="OPC-UA Historian Backend for FactoryIQ",
-    version="0.1.0"
+    version="1.1.0"
 )
 
 # Добавлять CORS только после создания app!
@@ -26,6 +27,9 @@ app.include_router(polling.router)
 app.include_router(analytics.router)
 app.include_router(reports.router)
 app.include_router(telegram_reports.router)
+app.include_router(report_styles.router)
+app.include_router(report_templates.router)
+app.include_router(telegram_channels.router)
 
 @app.get("/")
 def root():

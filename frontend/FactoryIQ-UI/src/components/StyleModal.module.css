@@ -1,0 +1,38 @@
+.modal :global(.ant-modal-body) {
+  max-height: 78vh;
+  overflow: auto;
+  padding-bottom: 12px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) 560px;
+  gap: 16px;
+  align-items: start;
+}
+
+.formCol {
+  display: flex;
+  flex-direction: column;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.previewCol {
+  position: sticky;
+  top: 8px;
+  align-self: start;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 8px var(--border-warm);
+  padding: 12px;
+}
+
+.previewTitle {
+  font-weight: 600;
+  margin-bottom: 8px;
+}

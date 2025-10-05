@@ -1,3 +1,5 @@
+/* StartPage.module.css — AltaiMai theme */
+
 /* Основной фон и центрирование */
 .startPage,
 .opcPage {
@@ -5,7 +7,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #f7f7fa;
+    background: var(--bg);
 }
 
 .centerWrapper {
@@ -18,66 +20,51 @@
 
 /* Общая карточка */
 .card {
-    background: #fff;
-    border-radius: 18px;
-    box-shadow: 0 8px 32px rgba(100, 100, 140, .15);
-    padding: 2.1rem 2.5rem 2.7rem 2.5rem;
+    composes: card from './theme.module.css';
+    padding: 2.1rem 2.5rem 2.7rem;
     width: 720px;
     max-width: 99vw;
     text-align: left;
     margin: 0 auto;
-    font-family: 'Montserrat', Arial, sans-serif;
+    font-family: var(--font-sans);
     position: relative;
 }
 
 .title {
     text-align: center;
     font-size: 2.05rem;
-    font-weight: 700;
-    color: #1a2947;
-    margin: 0 0 1.2rem 0;
-    letter-spacing: 1px;
+    font-weight: 800;
+    color: var(--oil-700);
+    margin: 0 0 1.2rem;
+    letter-spacing: 0.02em;
 }
 
 .sectionTitle {
-    font-weight: 600;
-    font-size: 1.21rem;
+    font-weight: 700;
+    font-size: 1.18rem;
     margin-top: 1.3rem;
     margin-bottom: 0.85rem;
-    color: #224b60;
-    letter-spacing: 0.01em;
-    border-left: 4px solid #00ffc6;
+    color: var(--seed-900);
+    border-left: 4px solid var(--oil-300);
     padding-left: 0.75rem;
 }
 
 .sectionTitleMini {
     font-size: 1.01rem;
-    color: #217b92;
+    color: var(--oil-600);
     margin-bottom: 4px;
-    font-weight: 500;
+    font-weight: 600;
 }
 
-/* Инпуты и селекты */
+/* Инпуты */
 .input {
-    font-family: inherit;
-    width: 100%;
-    min-width: 0;
-    padding: 0.54rem 0.98rem;
-    border-radius: 7px;
-    border: 1.2px solid #dde2f3;
-    font-size: 1rem;
+    composes: input from './theme.module.css';
     margin-bottom: 0.07rem;
-    background: #f8fafc;
-    transition: border .18s;
     margin-right: 0.55rem;
-    box-sizing: border-box;
+    min-width: 0;
 }
 
-.input:focus {
-    border: 1.5px solid #00ffc6;
-    outline: none;
-}
-
+/* Блоки */
 .addServerBlock {
     display: flex;
     gap: 0.44rem;
@@ -85,57 +72,20 @@
     align-items: center;
 }
 
+/* Кнопки */
 .iconBtn {
-    background: linear-gradient(90deg, #eafaff 0%, #b8e8fa 100%);
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px #00ffc630;
-    color: #1a99b7;
+    composes: btn btn--ghost from './theme.module.css';
+    color: var(--oil-600);
+    font-size: 1.1rem;
     padding: 0.28rem 0.69rem;
-    margin-right: 0.07rem;
-    cursor: pointer;
-    font-size: 1.17rem;
-    display: flex;
-    align-items: center;
-    transition: background 0.19s, box-shadow 0.19s;
-}
-
-.iconBtn:hover {
-    background: linear-gradient(90deg, #b6f6e6 0%, #9fdbff 100%);
-    box-shadow: 0 4px 16px #00ffc670;
 }
 
 .button {
-    background: linear-gradient(90deg, #00ffc6 0%, #0089fc 100%);
-    color: #172339;
-    border: none;
-    border-radius: 8px;
-    font-family: inherit;
-    font-size: 1.09rem;
-    font-weight: 700;
+    composes: btn from './theme.module.css';
+    font-size: 1.05rem;
     padding: 0.55rem 1.1rem;
-    cursor: pointer;
-    transition: box-shadow 0.19s, background 0.19s;
-    box-shadow: 0 2px 8px #00ffc630;
     margin-right: 0.12rem;
     margin-bottom: 0.09rem;
-}
-
-.button,
-.smallBtn {
-    transition: box-shadow 0.15s, background 0.13s;
-}
-
-.button:hover,
-.smallBtn:hover {
-    box-shadow: 0 2px 16px #00ffd28e, 0 0px 0px #09f3b1;
-    background: linear-gradient(90deg, #b2fff4 0%, #6dbbff 100%);
-    color: #17455f;
-}
-
-.button:hover:not(:disabled) {
-    background: linear-gradient(90deg, #00ffc6 10%, #00b9ff 100%);
-    box-shadow: 0 4px 16px #00ffc6a8;
 }
 
 .button:disabled {
@@ -145,21 +95,29 @@
     pointer-events: none;
 }
 
+.smallBtn {
+    composes: btn btn--ghost from './theme.module.css';
+    font-size: 0.95rem;
+    padding: 0.22rem 0.75rem;
+    margin-right: 3px;
+    margin-bottom: 2px;
+}
+
 /* Таблица серверов и тегов */
 .table {
     width: 100%;
     border-collapse: collapse;
-    margin: 0.7rem 0 0.6rem 0;
-    background: #f8fcff;
-    border-radius: 9px;
-    box-shadow: 0 1px 12px #00ffc619;
+    margin: 0.7rem 0 0.6rem;
+    background: var(--paper);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-warm-s);
     overflow: hidden;
     font-size: 0.98rem;
 }
 
 .table th,
 .table td {
-    border-bottom: 1px solid #e6eef8;
+    border-bottom: 1px solid var(--border-warm);
     padding: 0.56rem 0.58rem;
     text-align: left;
     font-weight: 400;
@@ -167,18 +125,13 @@
 }
 
 .table th {
-    background: #e4f8fd;
-    color: #26758b;
-    font-weight: 600;
+    background: var(--oil-50);
+    color: var(--oil-700);
+    font-weight: 700;
 }
 
-.table tr:last-child td {
-    border-bottom: none;
-}
-
-.table tr:hover {
-    background: #eefcff;
-}
+.table tr:last-child td { border-bottom: none; }
+.table tr:hover { background: var(--oil-50); }
 
 .table .ellipsis {
     max-width: 160px;
@@ -187,26 +140,7 @@
     text-overflow: ellipsis;
 }
 
-.smallBtn {
-    font-size: 1.07rem;
-    background: linear-gradient(90deg, #f2fffa 0%, #d8f2fa 100%);
-    color: #2376b3;
-    border: none;
-    border-radius: 7px;
-    padding: 0.22rem 0.75rem;
-    cursor: pointer;
-    margin-right: 3px;
-    margin-bottom: 2px;
-    transition: background 0.17s, box-shadow 0.15s;
-    box-shadow: 0 1px 4px #00ffc610;
-}
-
-.smallBtn:hover {
-    background: linear-gradient(90deg, #aff9e8 0%, #bad8ff 100%);
-    color: #1d475a;
-}
-
-/* Блоки лога, найденных серверов, тегов */
+/* Блоки состояния */
 .scanPanel {
     display: flex;
     align-items: center;
@@ -215,97 +149,141 @@
 }
 
 .logPanel {
-    margin: 0.6rem 0 0.2rem 0;
+    margin: 0.6rem 0 0.2rem;
     font-size: 0.97rem;
-    color: #2b507b;
-    background: #f2fafd;
-    border-radius: 7px;
+    color: var(--seed-800);
+    background: var(--paper);
+    border-radius: var(--radius-s);
     padding: 0.55rem 1rem;
     min-height: 22px;
+    box-shadow: var(--shadow-warm-s);
 }
 
 .foundBlock {
-    margin: 0.5rem 0 0.35rem 0;
+    margin: 0.5rem 0 0.35rem;
     padding: 0.5rem 1rem;
-    background: #e7fff5;
-    border-radius: 7px;
-    color: #227b6d;
+    background: var(--oil-50);
+    border-radius: var(--radius-s);
+    color: var(--oil-700);
 }
 
 .status {
     margin: 0.5rem 0;
     font-size: 1rem;
-    color: #00b09b;
-    font-weight: 600;
+    color: var(--oil-600);
+    font-weight: 700;
 }
 
-.statusOk {
-    color: #13d477;
-    font-weight: bold;
-    margin-top: 1.1rem;
-}
-
-.statusError {
-    color: #fd225d;
-    font-weight: bold;
-    margin-top: 1.1rem;
-}
+.statusOk { color: #13d477; font-weight: 800; margin-top: 1.1rem; }
+.statusError { color: #fd225d; font-weight: 800; margin-top: 1.1rem; }
 
 /* Работа с тегами */
-.tableBlock {
-    margin-bottom: 1rem;
-}
+.tableBlock { margin-bottom: 1rem; }
 
 .valueEmpty {
-    color: #b4c0d9;
+    color: var(--seed-300);
     font-size: 1.13em;
 }
 
 .archived {
     background: #e7ffe5 !important;
     color: #23a031;
-    font-weight: 600;
+    font-weight: 700;
 }
 
+/* Контейнер кнопок — без composes */
 .tagBtnsRow {
-    display: flex;
-    gap: 0.55rem;
-    margin: 0.13rem 0 0.43rem 0;
+  display: flex;
+  gap: 0.55rem;
+  margin: 0.13rem 0 0.43rem 0;
 }
 
-.tagBtnsRow button {
-    background: linear-gradient(90deg, #eaf7ff 0%, #b8e8fa 100%);
-    color: #227b6d;
-    font-size: 0.98rem;
-    font-weight: 500;
-    border-radius: 7px;
-    border: none;
-    padding: 0.34rem 1.12rem;
-    margin-bottom: 0.1rem;
-    box-shadow: 0 2px 6px #00ffc61a;
-    cursor: pointer;
-    transition: background 0.17s;
+/* Отдельный локальный класс ДЛЯ самой кнопки — тут уже composes можно */
+.tagBtn {
+  composes: btn btn--ghost from './theme.module.css';
+  font-size: 0.95rem;
+  padding: 0.34rem 1.12rem;
 }
 
-.tagBtnsRow button:hover {
-    background: linear-gradient(90deg, #a8ffe2 0%, #b3e6fc 100%);
+/* При необходимости — вариант с “полной” кнопкой из темы */
+.tagBtnPrimary {
+  composes: btn from './theme.module.css';
+  font-size: 0.95rem;
+  padding: 0.34rem 1.12rem;
 }
 
+/* Иконка в заголовке */
+.titleIcon {
+  margin-right: 10px;
+  color: var(--oil-300);
+  filter: drop-shadow(0 0 7px color-mix(in oklab, var(--oil-300) 50%, transparent));
+  vertical-align: middle;
+}
+
+/* Секция с разворачиванием */
+.foldTitle {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 1.2rem;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--seed-900);
+}
+
+/* Обёртка дерева (карточка/панель) */
+.treePanel {
+  composes: panel from './theme.module.css';
+  padding: 12px;
+  margin-top: 20px;
+  max-height: 600px;
+  height: 600px;
+  overflow: auto;
+}
+
+/* Блок деталей выбранного тега */
+.tagInfo {
+  background: var(--oil-50);
+  border: 1px solid var(--border-warm);
+  border-radius: var(--radius-s);
+  padding: 12px;
+  margin-top: 12px;
+}
+
+/* Ряды кнопок/действий */
+.actionsRow { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Кнопки по месту */
+.btnPrimary { composes: btn from './theme.module.css'; }
+.btnGhost   { composes: btn btn--ghost from './theme.module.css'; }
+.btnMini    { composes: btn btn--ghost from './theme.module.css'; padding: .22rem .75rem; font-size: 1rem; }
+
+/* Икон-кнопка в инпутной панели */
+.iconBtnSolid { composes: btn btn--ghost from './theme.module.css'; padding: .35rem .6rem; }
+
+/* Таблица/панель логов и найденных серверов уже есть в модуле;
+   добавим утил для "успеха" */
+.ok {
+  color: var(--oil-600);
+  font-weight: 700;
+}
+
+/* Выделение выбранной строки/секции при необходимости */
+.rowSelected { background: var(--oil-50); }
+
+
+
+/* Анимации */
 @keyframes fadeInRow {
-    from {
-        opacity: 0;
-        transform: translateY(12px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .table tbody tr:hover {
-    background: #f1fcff;
-    box-shadow: 0 4px 18px #00fff547;
+    background: var(--oil-50);
+    box-shadow: var(--shadow-warm-s);
     transition: box-shadow 0.18s, background 0.15s;
     cursor: pointer;
 }
@@ -314,30 +292,28 @@
     animation: fadeInRow 1.05s cubic-bezier(.53, -.18, .38, 1.18);
 }
 
+/* Лоадер */
 .loadingOverlay {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    inset: 0;
     background: rgba(255,255,255,0.7);
     z-index: 1000;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-  }
-  
-  .loader {
+}
+
+.loader {
     border: 8px solid #f3f3f3;
-    border-top: 8px solid #22d7c7;
+    border-top: 8px solid var(--oil-400);
     border-radius: 50%;
     width: 64px;
     height: 64px;
     animation: spin 1.2s linear infinite;
     margin-bottom: 18px;
-  }
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  
-/* Адаптивность ОТКЛЮЧЕНА (серверное приложение) */
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

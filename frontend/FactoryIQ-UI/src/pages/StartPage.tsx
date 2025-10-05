@@ -10,76 +10,81 @@ import {
   ActivitySquare,
   BarChart2,
   FileText,
-} from "lucide-react"; // или любые другие иконки
+} from "lucide-react";
 
 const StartPage: React.FC = () => {
   const navigate = useNavigate();
 
   return (
     <div className={styles.startPage}>
-      <div className={styles.centerCard}>
-        <div className={styles.logoBlock}>
-          <img src={logo} alt="AltaiMai" className={styles.logo} />
-          <h1 className={styles.title}>FactoryIQ</h1>
-        </div>
-        <div className={styles.subtitle}>
-          Индустриальная платформа сбора, анализа и визуализации данных
-          <br />
-          <span>OPC UA · SQL </span>
-        </div>
-        <div className={styles.menuGrid}>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/opc-servers")}
-          >
-            <Server size={28} /> OPC UA Серверы
-          </button>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/polling-tasks")}
-          >
-            <ActivitySquare size={28} /> Мониторинг задач
-          </button>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/opc-tags")}
-          >
-            <List size={28} /> Теги OPC UA
-          </button>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/analytics")}
-          >
-            <BarChart2 size={28} /> Аналитика
-          </button>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/create-report")}
-          >
-            <Database size={28} /> Отчёты
-          </button>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/settings")}
-          >
-            <Settings size={28} /> Настройки системы
-          </button>
-          <button
-            className={styles.menuBtn}
-            onClick={() => navigate("/tg-reports")}
-          >
-            <FileText size={28} /> Созданные отчёты TELEGRAM
-          </button>
+      <div className={styles.centerBlock}>
+        <div className={`card ${styles.centerCard}`}>
+          <div className={styles.logoBlock}>
+            <img src={logo} alt="AltaiMai" className={styles.logo} />
+            <h1 className="h-title" style={{ textAlign: "center" }}>
+              AltaiMai FactoryIQ
+            </h1>
+          </div>
 
-        </div>
+          <div className={styles.subtitle}>
+            Индустриальная платформа сбора, анализа и визуализации данных
+          </div>
 
-        {/* Футер с авторством и названием компании */}
-        <div className={styles.footer}>
-          <div className={styles.footerContent}>
-            <span className={styles.companyName}>
-              © {new Date().getFullYear()} MFG Mastermind
-            </span>
-            <span className={styles.devInfo}>Разработка: Дмитрий Шемелин</span>
+          <div className={styles.menuGrid}>
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/opc-servers")}
+            >
+              <Server size={22} /> OPC UA Серверы
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/polling-tasks")}
+            >
+              <ActivitySquare size={22} /> Задачи опроса PLC
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/opc-tags")}
+            >
+              <List size={22} /> Переменные OPC UA
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/analytics")}
+            >
+              <BarChart2 size={22} /> Аналитика
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/create-report")}
+            >
+              <Database size={22} /> Отчёты и шаблоны отчётов
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/settings")}
+            >
+              <Settings size={22} /> Настройки системы
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/tg-reports")}
+            >
+              <FileText size={22} /> Созданные отчёты TELEGRAM
+            </button>
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/tg-channels")}
+            >
+              <FileText size={22} /> Телеграм-каналы
+            </button>
           </div>
         </div>
       </div>

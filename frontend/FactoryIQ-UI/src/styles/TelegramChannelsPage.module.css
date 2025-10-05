@@ -1,0 +1,160 @@
+.page {
+  padding: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.title {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.searchRow {
+  margin-bottom: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.searchInput {
+  width: 360px;
+  padding: 8px 10px;
+  border: 1px solid rgba(2, 6, 23, .08);
+  border-radius: 8px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+}
+
+.tableWrap {
+  overflow: auto;
+  border: 1px solid rgba(2, 6, 23, .08);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.table thead tr {
+  background: var(--surface, #f8fafc);
+}
+
+.th {
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  position: sticky;
+  top: 0;
+  background: var(--surface, #f8fafc);
+}
+
+.td {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  border-top: 1px solid rgba(2, 6, 23, .08);
+}
+
+.tdCenter {
+  composes: td;
+  text-align: center;
+}
+
+.tdRight {
+  composes: td;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.badgeOn {
+  composes: badge;
+  background: #e8f7ec;
+  color: #0f5132;
+}
+
+.badgeOff {
+  composes: badge;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.statusOn {
+  color: #16a34a;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.statusOff {
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.empty {
+  padding: 20px;
+  text-align: center;
+  color: #64748b;
+}
+
+/* ------- Модальное окно ------- */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, .35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modalCard {
+  width: 560px;
+  max-width: 90vw;
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.switches {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}

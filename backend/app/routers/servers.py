@@ -1,30 +1,54 @@
-# servers.py
+# servers_refactored.py
 from dotenv import load_dotenv
 load_dotenv()
-from fastapi import APIRouter, Query, Request, Body
-from fastapi.responses import StreamingResponse
-from .models import OpcServer
-from ..db import get_db_connection
+
+import os
+import json
 import asyncio
 import ipaddress
 import socket
-import json
-from ..tasks_manager import tasks_manager
-from fastapi import BackgroundTasks
-from fastapi import HTTPException
-from asyncua import Client
-from app.utils.crypto_helper import encrypt_password, decrypt_password
-from pydantic import BaseModel
+import datetime
 from typing import Optional
-from asyncua import ua
+
+from fastapi import APIRouter, Query, Request, Body, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+import pyodbc
+from ..config import get_conn_str
+
+from ..tasks_manager import tasks_manager
+
+from asyncua import Client, ua
 from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
-import os
+
+from app.utils.crypto_helper import encrypt_password, decrypt_password
+
 router = APIRouter(prefix="/servers", tags=["servers"])
 
-# ----------------------
-# CRUD Эндпоинты OPC UA серверов
-# ----------------------
+# -----------------------------------------------------------------------------
+# DB helper (единый стиль)
+# -----------------------------------------------------------------------------
+def _db():
+    return pyodbc.connect(get_conn_str())
 
+
+# -----------------------------------------------------------------------------
+# Константы по OPC UA безопасности/сертификатам
+# -----------------------------------------------------------------------------
+OPC_SECURITY_POLICIES = ["Basic256Sha256", "Basic128Rsa15", "None"]
+OPC_SECURITY_MODES = ["None", "Sign", "SignAndEncrypt"]
+DEFAULT_OPC_SECURITY_POLICY = "Basic256Sha256"
+DEFAULT_OPC_SECURITY_MODE = "Sign"
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # корень /app
+CLIENT_CERT_PATH = os.path.join(BASE_DIR, "client.der")
+CLIENT_KEY_PATH = os.path.join(BASE_DIR, "client_private.der")
+SERVER_CERT_PATH = os.path.join(BASE_DIR, "pki", "trusted", "certs", "PLC-PE_OPCUA.der")  # не обязателен
+
+# -----------------------------------------------------------------------------
+# МОДЕЛИ API
+# -----------------------------------------------------------------------------
 class TagInfo(BaseModel):
     node_id: str
     browse_name: str = ""
@@ -41,39 +65,23 @@ class PollingRequest(BaseModel):
     security_policy: str = "Basic256Sha256"  # По умолчанию Siemens
     security_mode: str = "Sign"              # Можно также: None, SignAndEncrypt
 
-
 class StopPollingRequest(BaseModel):
     task_id: str
 
-class OpcServer(BaseModel):
+# Pydantic DTO для ответа/запроса по серверам (чтобы не конфликтовать с .models)
+class OpcServerDTO(BaseModel):
     id: Optional[int] = None
     name: str
     endpoint_url: str
     description: Optional[str] = ""
     opcUsername: Optional[str] = ""
-    opcPassword: Optional[str] = ""   # <--- добавь это!
+    opcPassword: Optional[str] = ""   # хранится шифровкой в БД
     securityPolicy: Optional[str] = ""
     securityMode: Optional[str] = ""
 
-OPC_SECURITY_POLICIES = [
-    "Basic256Sha256",
-    "Basic128Rsa15",
-    "None",
-]
-OPC_SECURITY_MODES = [
-    "None",
-    "Sign",
-    "SignAndEncrypt",
-]
-DEFAULT_OPC_SECURITY_POLICY = "Basic256Sha256"
-DEFAULT_OPC_SECURITY_MODE = "Sign"
-
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # корень /app
-
-CLIENT_CERT_PATH = os.path.join(BASE_DIR, "client.der")
-CLIENT_KEY_PATH = os.path.join(BASE_DIR, "client_private.der")
-SERVER_CERT_PATH = os.path.join(BASE_DIR, "pki", "trusted", "certs", "PLC-PE_OPCUA.der")
+# -----------------------------------------------------------------------------
+# Вспомогательные функции
+# -----------------------------------------------------------------------------
 @router.get("/opc_security_options")
 def get_opc_security_options():
     return {
@@ -83,30 +91,28 @@ def get_opc_security_options():
         "defaultMode": DEFAULT_OPC_SECURITY_MODE,
     }
 
-
-def get_server_credentials(endpoint_url):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+def get_server_credentials(endpoint_url: str):
+    with _db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
             SELECT OpcUsername, OpcPassword, SecurityPolicy, SecurityMode
             FROM OpcServers WHERE EndpointUrl=?
         """, endpoint_url)
-        row = cursor.fetchone()
+        row = cur.fetchone()
         if row:
             username, enc_password, policy, mode = row
             password = decrypt_password(enc_password) if enc_password else None
             return username, password, policy, mode
         return None, None, None, None
-    
 
 async def get_configured_client(
     endpoint_url: str,
     username: str | None = None,
     password: str | None = None,
-    security_policy: str = None,
-    security_mode: str = None
+    security_policy: str | None = None,
+    security_mode: str | None = None
 ) -> Client:
-    # Игнорируем SECURITY_POLICY_MAP — всегда используем класс политики!
+    # Если что-то не передали — добираем из БД
     if not username or not password or not security_policy or not security_mode:
         db_username, db_password, db_policy, db_mode = get_server_credentials(endpoint_url)
         username = username or db_username
@@ -114,11 +120,10 @@ async def get_configured_client(
         security_policy = security_policy or db_policy or "Basic256Sha256"
         security_mode = security_mode or db_mode or "Sign"
 
-    # Только такой класс для Siemens и большинства OPC UA!
+    # Для Siemens (и большинства) этого достаточно
     policy_class = SecurityPolicyBasic256Sha256
     mode_enum = getattr(ua.MessageSecurityMode, security_mode or "Sign")
 
-    print(f"CONNECTING with policy_class={policy_class}, security_mode={mode_enum}")  # debug
     client = Client(endpoint_url)
     await client.set_security(
         policy=policy_class,
@@ -133,11 +138,8 @@ async def get_configured_client(
     return client
 
 def is_valid_opc_tag(tag: dict) -> bool:
-    # 1. Оставляем только переменные
     if tag.get("node_class", "").lower() != "variable":
         return False
-
-    # 2. Явно отбрасываем служебные browse_name/NodeId
     banned_prefixes = (
         "Server", "Namespace", "UrisVersion", "Session", "Status",
         "Aggregate", "Password", "Certificate", "User", "Array", "Vendor", "LastChange"
@@ -148,208 +150,122 @@ def is_valid_opc_tag(tag: dict) -> bool:
     if browse_name.lower() in ("identities", "applications", "endpoints", "configuration"):
         return False
 
-    # 3. Исключаем все, что похоже на urn или массивы/структуры
     dt = str(tag.get("data_type") or "")
     if dt.startswith("urn:") or "structure" in dt.lower() or "array" in dt.lower():
         return False
 
-    # 4. Значение не должно быть списком или urn-строкой
     val = tag.get("value")
     if isinstance(val, list) or (isinstance(val, str) and val.startswith("urn:")):
         return False
 
     return True
 
-
-# Функция для проверки/создания тегов и возврата словаря node_id -> tag_id
-def ensure_tags_and_get_ids(conn, server_id, tags):
-    try:
-        nodeid_to_tagid = {}
-        node_ids = [t['node_id'] for t in tags]
-        print(f"===> [ENSURE] Проверяем теги: {node_ids}")
-
-        if not node_ids:
-            print("===> [ENSURE] node_ids пустой!")
-            return nodeid_to_tagid
-
-        # Получаем уже существующие теги по server_id и node_id
-        format_strings = ','.join('?' for _ in node_ids)
-        cursor = conn.cursor()
-        cursor.execute(
-            f"SELECT Id, NodeId FROM OpcTags WHERE ServerId=? AND NodeId IN ({format_strings})",
-            [server_id] + node_ids
-        )
-        for row in cursor.fetchall():
-            nodeid_to_tagid[row[1]] = row[0]
-
-        # Вставляем только те, которых нет в базе
-        for tag in tags:
-            if tag['node_id'] not in nodeid_to_tagid:
-                try:
-                    cursor.execute(
-                        """INSERT INTO OpcTags
-                        (ServerId, BrowseName, NodeId, DataType, Description)
-                        OUTPUT INSERTED.Id
-                        VALUES (?, ?, ?, ?, ?)""",
-                        server_id,
-                        tag.get('browse_name', ''),
-                        tag['node_id'],
-                        tag.get('data_type', ''),
-                        tag.get('description', ''),
-                    )
-                    inserted_id = cursor.fetchone()[0]
-                    nodeid_to_tagid[tag['node_id']] = inserted_id
-                except Exception as insert_ex:
-                    # Если дубль (уникальный ключ) - получаем ID из базы
-                    print(f"[ENSURE] Дубль для {tag['node_id']}: {insert_ex}")
-                    cursor.execute(
-                        "SELECT Id FROM OpcTags WHERE ServerId=? AND NodeId=?",
-                        server_id, tag['node_id']
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        nodeid_to_tagid[tag['node_id']] = row[0]
-        conn.commit()
-        print(f"===> [ENSURE] Итоговая мапа тегов: {nodeid_to_tagid}")
+def ensure_tags_and_get_ids(conn: pyodbc.Connection, server_id: int, tags: list[dict]) -> dict[str, int]:
+    """
+    Гарантирует наличие тегов в OpcTags и возвращает мапу node_id -> tag_id.
+    Работает на ПЕРЕДАННОМ соединении (без внутренних _db()).
+    """
+    nodeid_to_tagid: dict[str, int] = {}
+    node_ids = [t['node_id'] for t in tags]
+    if not node_ids:
         return nodeid_to_tagid
-    except Exception as e:
-        print(f"===> [ENSURE] Ошибка в ensure_tags_and_get_ids: {e}")
-        raise
+
+    cur = conn.cursor()
+    placeholders = ",".join("?" for _ in node_ids)
+    cur.execute(
+        f"SELECT Id, NodeId FROM OpcTags WHERE ServerId=? AND NodeId IN ({placeholders})",
+        [server_id, *node_ids]
+    )
+    for row in cur.fetchall():
+        nodeid_to_tagid[row[1]] = row[0]
+
+    for tag in tags:
+        if tag['node_id'] in nodeid_to_tagid:
+            continue
+        try:
+            cur.execute(
+                """INSERT INTO OpcTags
+                   (ServerId, BrowseName, NodeId, DataType, Description)
+                   OUTPUT INSERTED.Id
+                   VALUES (?, ?, ?, ?, ?)""",
+                server_id,
+                tag.get('browse_name', ''),
+                tag['node_id'],
+                tag.get('data_type', ''),
+                tag.get('description', ''),
+            )
+            inserted_id = cur.fetchone()[0]
+            nodeid_to_tagid[tag['node_id']] = inserted_id
+        except Exception:
+            # если дубликат — достанем Id
+            cur.execute("SELECT Id FROM OpcTags WHERE ServerId=? AND NodeId=?", server_id, tag['node_id'])
+            r2 = cur.fetchone()
+            if r2:
+                nodeid_to_tagid[tag['node_id']] = r2[0]
+
+    conn.commit()
+    return nodeid_to_tagid
 
 
-
+# -----------------------------------------------------------------------------
+# CRUD
+# -----------------------------------------------------------------------------
 @router.put("/servers/{server_id}")
 def update_server(server_id: int, server: dict):
-    from ..db import get_db_connection
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
+    with _db() as conn:
+        cur = conn.cursor()
+        cur.execute(
             "UPDATE OpcServers SET Name=?, EndpointUrl=?, Description=? WHERE Id=?",
             server.get("name"), server.get("endpoint_url"), server.get("description", ""), server_id
         )
-        if cursor.rowcount == 0:
+        if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Server not found")
         conn.commit()
     return {"ok": True}
 
 @router.delete("/servers/{server_id}")
 def delete_server(server_id: int):
-    from ..db import get_db_connection
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        # Проверка что нет задач
-        cursor.execute("SELECT COUNT(*) FROM PollingTasks WHERE server_url = (SELECT EndpointUrl FROM OpcServers WHERE Id=?)", server_id)
-        count = cursor.fetchone()[0]
+    with _db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM PollingTasks WHERE server_url = (SELECT EndpointUrl FROM OpcServers WHERE Id=?)", server_id)
+        count = cur.fetchone()[0]
         if count > 0:
             raise HTTPException(status_code=400, detail="Сначала удалите все задачи, связанные с этим сервером")
-        cursor.execute("DELETE FROM OpcServers WHERE Id=?", server_id)
-        if cursor.rowcount == 0:
+        cur.execute("DELETE FROM OpcServers WHERE Id=?", server_id)
+        if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Server not found")
         conn.commit()
     return {"ok": True}
 
-
-@router.post("/is_polling")
-async def is_polling(req: PollingRequest):
-    task_id = f"{req.endpoint_url}:" + ",".join([t.node_id for t in req.tags])
-    running = tasks_manager.is_running(task_id)
-    return {"ok": True, "running": running}
-
-@router.post("/start_polling")
-async def start_polling(req: PollingRequest):
-    endpoint_url = req.endpoint_url
-    tags = req.tags
-    interval = req.interval
-    task_id = f"{endpoint_url}:" + ",".join([t.node_id for t in tags])
-
-    async def poll_and_save():
-        print("====> [DEBUG] poll_and_save стартовал!")
-
-        from ..db import get_db_connection
-        tag_dicts = [t.dict() for t in tags]
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT Id FROM OpcServers WHERE EndpointUrl = ?", endpoint_url)
-            row = cursor.fetchone()
-            if not row:
-                print(f"===> [POLL] Сервер {endpoint_url} не найден в базе!")
-                return
-            server_id = row[0]
-            nodeid_to_tagid = ensure_tags_and_get_ids(conn, server_id, tag_dicts)
-
-        client = await get_configured_client(
-            endpoint_url,
-            username=req.username,
-            password=req.password,
-            security_policy=req.security_policy,
-            security_mode=req.security_mode
-        )
-
-        async with client:
-            while True:
-                try:
-                    values = []
-                    for t in tags:
-                        try:
-                            val = await client.get_node(t.node_id).read_value()
-                            values.append((t.node_id, val, datetime.datetime.now()))
-                        except Exception as e:
-                            print(f"Ошибка чтения {t.node_id}: {e}")
-                    with get_db_connection() as conn:
-                        cursor = conn.cursor()
-                        for node_id, val, dt in values:
-                            tag_id = nodeid_to_tagid[node_id]
-                            cursor.execute(
-                                "INSERT INTO OpcData (TagId, Value, Timestamp) VALUES (?, ?, ?)",
-                                tag_id, val, dt)
-                        conn.commit()
-                    await asyncio.sleep(interval)
-                except asyncio.CancelledError:
-                    break
-                except Exception as ex:
-                    print(f"===> Polling error: {ex}")
-                    await asyncio.sleep(interval)
-
-    if not tasks_manager.start(task_id, poll_and_save()):
-        return {"ok": False, "message": "Уже выполняется"}
-    return {"ok": True, "message": "Циклический опрос запущен"}
-
-@router.post("/stop_polling")
-async def stop_polling(req: StopPollingRequest):
-    tasks_manager.stop(req.task_id)
-    return {"ok": True, "message": "Опрос остановлен"}
-
-@router.get("/servers", response_model=list[OpcServer])
+@router.get("/servers", response_model=list[OpcServerDTO])
 def list_servers():
-    servers = []
-    with get_db_connection() as conn:
+    servers: list[OpcServerDTO] = []
+    with _db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT Id, Name, EndpointUrl, Description FROM OpcServers")
         for row in cursor.fetchall():
-            servers.append(OpcServer(
-                id=row[0], name=row[1], endpoint_url=row[2], description=row[3] 
+            servers.append(OpcServerDTO(
+                id=row[0], name=row[1], endpoint_url=row[2], description=row[3]
             ))
     return servers
-# routers/servers.py
 
-@router.post("/servers", response_model=OpcServer)
-def create_server(server: OpcServer):
+@router.post("/servers", response_model=OpcServerDTO)
+def create_server(server: OpcServerDTO):
     encrypted_password = encrypt_password(server.opcPassword)
-    with get_db_connection() as conn:
+    with _db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO OpcServers (Name, EndpointUrl, Description, OpcUsername, OpcPassword, SecurityPolicy, SecurityMode)
             OUTPUT INSERTED.Id
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, server.name, server.endpoint_url, server.description,
-             server.opcUsername, encrypted_password, server.securityPolicy, server.securityMode)
+           server.opcUsername, encrypted_password, server.securityPolicy, server.securityMode)
         new_id = cursor.fetchone()[0]
-    return OpcServer(id=new_id, name=server.name, endpoint_url=server.endpoint_url)
-
+        conn.commit()
+    return OpcServerDTO(id=new_id, name=server.name, endpoint_url=server.endpoint_url, description=server.description)
 
 def get_server_config(endpoint_url: str):
-    with get_db_connection() as conn:
+    with _db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT OpcUsername, OpcPassword, SecurityPolicy, SecurityMode
@@ -365,9 +281,9 @@ def get_server_config(endpoint_url: str):
             "security_mode": row[3],
         }
 
-# ----------------------
-# SSE (лог поиска серверов по сети)
-# ----------------------
+# -----------------------------------------------------------------------------
+# SSE: скан сети
+# -----------------------------------------------------------------------------
 @router.get("/netscan_stream")
 async def netscan_stream(
     request: Request,
@@ -375,7 +291,7 @@ async def netscan_stream(
     ip_end: str,
     ports: str = "4840"
 ):
-    ports = [int(p) for p in ports.split(",") if p.strip().isdigit()]
+    ports_list = [int(p) for p in ports.split(",") if p.strip().isdigit()]
     ips = [str(ipaddress.IPv4Address(ip)) for ip in range(
         int(ipaddress.IPv4Address(ip_start)),
         int(ipaddress.IPv4Address(ip_end)) + 1
@@ -384,27 +300,22 @@ async def netscan_stream(
     async def event_generator():
         found = []
         for ip in ips:
-            for port in ports:
-                # Лог: проверяем IP:port
-                log_msg = {"type": "log", "ip": ip, "port": port}
-                yield f"data: {json.dumps(log_msg)}\n\n"
+            for port in ports_list:
+                yield f"data: {json.dumps({'type':'log','ip':ip,'port':port})}\n\n"
                 url, ok = await probe_opcua_endpoint(ip, port)
                 if ok:
                     found.append(url)
-                    found_msg = {"type": "found", "url": url}
-                    yield f"data: {json.dumps(found_msg)}\n\n"
+                    yield f"data: {json.dumps({'type':'found','url':url})}\n\n"
                 await asyncio.sleep(0.01)
                 if await request.is_disconnected():
                     return
-        finish_msg = {"type": "finish", "found": found}
-        yield f"data: {json.dumps(finish_msg)}\n\n"
+        yield f"data: {json.dumps({'type':'finish','found':found})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-# ----------------------
-# Классический однократный поиск (без лога, обычный ответ)
-# ----------------------
-
+# -----------------------------------------------------------------------------
+# Простой сетевой скан
+# -----------------------------------------------------------------------------
 async def probe_opcua_endpoint(
     ip, port=4840, timeout=1.5,
     username=None, password=None,
@@ -412,7 +323,6 @@ async def probe_opcua_endpoint(
     security_mode="Sign"
 ):
     url = f"opc.tcp://{ip}:{port}"
-    print(f"[DEBUG] probe_opcua_endpoint: {url} | {username=} {password=} {security_policy=} {security_mode=}")
     try:
         client = await get_configured_client(
             url,
@@ -438,41 +348,31 @@ async def netscan(
     securityPolicy: str = Query("Basic256Sha256", alias="securityPolicy"),
     securityMode: str = Query("Sign", alias="securityMode"),
 ):
-    ports = [int(p) for p in ports.split(",") if p.strip().isdigit()]
+    ports_list = [int(p) for p in ports.split(",") if p.strip().isdigit()]
     ips = [str(ipaddress.IPv4Address(ip)) for ip in range(
         int(ipaddress.IPv4Address(ip_start)),
         int(ipaddress.IPv4Address(ip_end)) + 1
     )]
-
-    tasks = []
-    for ip in ips:
-        for port in ports:
-            tasks.append(probe_opcua_endpoint(
-                ip, port=port,
-                username=opcUsername or None,
-                password=opcPassword or None,
-                security_policy=securityPolicy,
-                security_mode=securityMode,
-            ))
-
-    found = []
-    results = await asyncio.gather(*tasks)
-    for url, ok in results:
-        if ok:
-            found.append(url)
-
+    tasks = [
+        probe_opcua_endpoint(
+            ip, port=port,
+            username=opcUsername or None,
+            password=opcPassword or None,
+            security_policy=securityPolicy,
+            security_mode=securityMode,
+        )
+        for ip in ips for port in ports_list
+    ]
+    found = [url for url, ok in await asyncio.gather(*tasks) if ok]
     return {
         "ok": bool(found),
         "found_endpoints": found,
         "message": "Найдены OPC UA серверы" if found else "Сервера не найдены"
     }
 
-# ----------------------
+# -----------------------------------------------------------------------------
 # Проверка конкретного endpoint
-# ----------------------
-
-
-
+# -----------------------------------------------------------------------------
 async def check_opc(
     endpoint: str,
     username: Optional[str],
@@ -481,26 +381,17 @@ async def check_opc(
     mode: str
 ) -> bool | str:
     try:
-        from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
-        from asyncua import ua
-
-        # ТОЛЬКО поддержка Basic256Sha256
         policy_class = SecurityPolicyBasic256Sha256
         mode_enum = getattr(ua.MessageSecurityMode, mode, ua.MessageSecurityMode.Sign)
-        print(f"[DEBUG] endpoint={endpoint}")
-        print(f"[DEBUG] CLIENT_CERT_PATH={CLIENT_CERT_PATH}")
-        print(f"[DEBUG] CLIENT_KEY_PATH={CLIENT_KEY_PATH}")
 
         client = Client(endpoint)
         await client.set_security(
             policy=policy_class,
             certificate=CLIENT_CERT_PATH,
             private_key=CLIENT_KEY_PATH,
-            server_certificate=None,  # <<< вот это КРИТИЧНО!
+            server_certificate=None,
             mode=mode_enum,
         )
-        print("[DEBUG] Application URI:", client.application_uri)
-
         if username and password:
             client.set_user(username)
             client.set_password(password)
@@ -522,9 +413,6 @@ async def probe_server(
     securityPolicy: str = Query("Basic256Sha256", alias="securityPolicy"),
     securityMode: str = Query("Sign", alias="securityMode"),
 ):
-    """
-    Пробует подключиться к OPC UA endpoint с заданными параметрами безопасности.
-    """
     if not endpoint_url:
         raise HTTPException(status_code=400, detail="Не передан endpoint_url")
 
@@ -537,29 +425,21 @@ async def probe_server(
     )
 
     if res is True:
-        return {
-            "ok": True,
-            "endpoint_url": endpoint_url,
-            "message": "✅ OPC UA сервер доступен"
-        }
+        return {"ok": True, "endpoint_url": endpoint_url, "message": "✅ OPC UA сервер доступен"}
     else:
-        return {
-            "ok": False,
-            "endpoint_url": endpoint_url,
-            "message": f"❌ Ошибка: {res}"
-        }
+        return {"ok": False, "endpoint_url": endpoint_url, "message": f"❌ Ошибка: {res}"}
+
+# -----------------------------------------------------------------------------
+# Browse + запуск опроса
+# -----------------------------------------------------------------------------
 @router.post("/start_with_browse")
 async def start_with_browse(req: PollingRequest):
     endpoint_url = req.endpoint_url
     interval = req.interval
-    task_tags = []
+    task_tags: list[TagInfo] = []
 
-    # node_id можно брать из запроса или по умолчанию "i=85"
     node_id = getattr(req, "node_id", "i=85")
-    print(f"===> [BROWSE] Подключаемся к {endpoint_url} и ищем ВСЕ теги, начиная с {node_id}...")
-
     try:
-        # ПРАВИЛЬНО передаем security_policy и security_mode!
         client = await get_configured_client(
             endpoint_url,
             username=req.username,
@@ -571,8 +451,7 @@ async def start_with_browse(req: PollingRequest):
             start_node = client.get_node(node_id)
             found_tags = await browse_all_tags(client, start_node)
             filtered_tags = [tag for tag in found_tags if is_valid_opc_tag(tag)]
-            print(f"===> [BROWSE] Пройдена фильтрация: {len(filtered_tags)} из {len(found_tags)}")
-            for tag in filtered_tags:  # БЕРЁМ filtered_tags, а не found_tags!
+            for tag in filtered_tags:
                 task_tags.append(TagInfo(
                     node_id=tag["node_id"],
                     browse_name=tag["browse_name"],
@@ -595,54 +474,44 @@ async def start_with_browse(req: PollingRequest):
         return await start_polling(polling_request)
 
     except Exception as e:
-        print(f"===> [BROWSE] Ошибка: {e}")
         return {"ok": False, "message": f"Ошибка при browse: {str(e)}"}
 
-
-async def browse_all_tags(client, node=None, level=0):
-   
+async def browse_all_tags(client: Client, node=None, level=0):
     result = []
     if node is None:
-        node = client.get_node("i=85")  # Корень OPC UA
+        node = client.get_node("i=85")
     try:
         bname = await node.read_browse_name()
-        print("  " * level + f"[browse] {bname.Name} ({node.nodeid.to_string()})")
-    except Exception as e:
-        print("  " * level + f"[browse] [ERROR READ NAME] {node.nodeid.to_string()} | {e}")
-
+    except Exception:
+        bname = type("B", (), {"Name": "<error>"})()
     children = await node.get_children()
     for child in children:
         try:
             nodeclass = await child.read_node_class()
             bname = await child.read_browse_name()
-            print("  " * (level+1) + f"- {bname.Name} [{str(nodeclass).replace('NodeClass.', '')}] {child.nodeid.to_string()}")
             if nodeclass == ua.NodeClass.Variable:
                 dtype = str(await child.read_data_type_as_variant_type())
                 result.append({
                     "browse_name": bname.Name,
                     "node_id": child.nodeid.to_string(),
-                    "data_type": dtype
+                    "data_type": dtype,
+                    "node_class": "variable",
                 })
             elif nodeclass == ua.NodeClass.Object:
                 result += await browse_all_tags(client, child, level+1)
-        except Exception as e:
-            print("  " * (level+1) + f"[ERROR CHILD] {e}")
+        except Exception:
             continue
     return result
-
 
 @router.post("/browse")
 async def browse_node_api(
     endpoint_url: str = Body(...),
     node_id: str = Body("i=85"),
-    username: str = Body(None),
-    password: str = Body(None),
+    username: str | None = Body(None),
+    password: str | None = Body(None),
     security_policy: str = Body("Basic256Sha256"),
     security_mode: str = Body("Sign"),
 ):
-    """
-    Возвращает детей указанного node_id (по умолчанию i=85) + признак has_children и node_class как строку.
-    """
     client = await get_configured_client(
         endpoint_url,
         username=username,
@@ -659,7 +528,6 @@ async def browse_node_api(
                 try:
                     nodeclass = await child.read_node_class()
                     bname = await child.read_browse_name()
-                    # Преобразуем node_class в строку
                     node_class_str = {
                         ua.NodeClass.Object: "Object",
                         ua.NodeClass.Variable: "Variable",
@@ -670,7 +538,6 @@ async def browse_node_api(
                         ua.NodeClass.DataType: "DataType",
                         ua.NodeClass.View: "View"
                     }.get(nodeclass, str(nodeclass))
-                    # Проверяем есть ли у узла дети (лениво, быстро)
                     has_children = False
                     try:
                         child_children = await child.get_children()
@@ -694,7 +561,10 @@ async def browse_node_api(
         return {"ok": True, "children": result}
     except Exception as e:
         return {"ok": False, "message": f"Ошибка при browse: {str(e)}"}
-    
+
+# -----------------------------------------------------------------------------
+# Полный рекурсивный скан и сохранение в БД
+# -----------------------------------------------------------------------------
 @router.post("/scan_full_tree")
 async def scan_full_tree(
     server_id: int = Body(...),
@@ -704,10 +574,6 @@ async def scan_full_tree(
     securityPolicy: str = Body("Basic256Sha256"),
     securityMode: str = Body("Sign"),
 ):
-    """
-    Полностью рекурсивно обходит все дерево OPC UA, сохраняет карту тегов (все переменные) в базу OpcTags.
-    После этого фронт работает только с базой, а не с ПЛК!
-    """
     import base64
 
     def safe_to_str(val):
@@ -720,8 +586,7 @@ async def scan_full_tree(
             return base64.b64encode(val).decode('ascii')
         return str(val) if val is not None else ""
 
-
-    async def browse_all(client, node, parent_path=""):
+    async def browse_all(client: Client, node, parent_path=""):
         result = []
         try:
             bname = safe_to_str((await node.read_browse_name()).Name)
@@ -729,7 +594,6 @@ async def scan_full_tree(
             bname = "<error>"
         path = (parent_path + "/" + bname).strip("/") if parent_path else bname
         children = await node.get_children()
-        print(f"[SCAN_TREE] Node: {path} | children: {len(children)}")
         for child in children:
             try:
                 nodeclass = await child.read_node_class()
@@ -740,7 +604,6 @@ async def scan_full_tree(
                         dtype = safe_to_str(str(await child.read_data_type_as_variant_type()))
                     except Exception:
                         dtype = ""
-                    print(f"[SCAN_TREE]  VAR: {bname} {child.nodeid.to_string()} dtype={dtype} path={path}")
                     result.append({
                         "browse_name": bname,
                         "node_id": safe_to_str(child.nodeid.to_string()),
@@ -748,27 +611,12 @@ async def scan_full_tree(
                         "path": path
                     })
                 elif nodeclass == ua.NodeClass.Object:
-                    try:
-                        object_type = await child.read_type_definition()
-                        print(f"[SCAN_TREE]  OBJ: {bname} {child.nodeid.to_string()} ObjectType={object_type.to_string()}")
-                    except Exception as ex:
-                        print(f"[SCAN_TREE]  OBJ: {bname} {child.nodeid.to_string()} [ObjectType не определен]: {ex}")
                     result += await browse_all(client, child, path)
-                else:
-                    print(f"[SCAN_TREE]  SKIP: {bname} {child.nodeid.to_string()} class={nodeclass}")
-            except Exception as ex:
-                print(f"[SCAN_TREE] Ошибка на {getattr(child, 'nodeid', '?')}: {ex}")
+            except Exception:
                 continue
         return result
 
-
-    # Основная логика
     try:
-        print("[SCAN_TREE] === СТАРТ ===")
-        print(f"[SCAN_TREE] server_id: {server_id}, endpoint_url: {endpoint_url}")
-        print(f"[SCAN_TREE] securityPolicy: {securityPolicy}, securityMode: {securityMode}")
-        print(f"[SCAN_TREE] opcUsername: {opcUsername}, opcPassword: {'***' if opcPassword else ''}")
-
         client = await get_configured_client(
             endpoint_url,
             username=opcUsername or None,
@@ -780,13 +628,7 @@ async def scan_full_tree(
             root = client.get_node("i=85")
             tags = await browse_all(client, root)
 
-        print(f"[SCAN_TREE] === ОБХОД ЗАВЕРШЕН ===")
-        print(f"[SCAN_TREE] Всего найдено: {len(tags)}")
-        for t in tags[:10]:
-            print("[SCAN_TREE] Первый тег:", t)
-
-        # --- Сохраняем всё в базу ---
-        with get_db_connection() as conn:
+        with _db() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT NodeId FROM OpcTags WHERE ServerId=?", server_id)
             existing_nodeids = set(row[0] for row in cursor.fetchall())
@@ -798,8 +640,7 @@ async def scan_full_tree(
                 try:
                     cursor.execute(
                         """INSERT INTO OpcTags (ServerId, BrowseName, NodeId, DataType, Path, Description)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
+                           VALUES (?, ?, ?, ?, ?, ?)""",
                         server_id,
                         tag.get("browse_name", ""),
                         node_id,
@@ -808,20 +649,84 @@ async def scan_full_tree(
                         ""
                     )
                     inserted += 1
-                except Exception as ex:
-                    print(f"[SCAN_TREE] Ошибка при вставке: {ex}")
+                except Exception:
+                    pass
             conn.commit()
 
-        print(f"[SCAN_TREE] === СОХРАНЕНО В БАЗУ: {inserted} ===")
-        return {
-            "ok": True,
-            "found": len(tags),
-            "inserted": inserted,
-            "debug_first_tags": tags[:5],
-            "debug_server_id": server_id
-        }
+        return {"ok": True, "found": len(tags), "inserted": inserted, "debug_first_tags": tags[:5], "debug_server_id": server_id}
     except Exception as ex:
         import traceback
-        tb = traceback.format_exc()
-        print("[SCAN_TREE] ГЛОБАЛЬНАЯ ОШИБКА:", tb)
-        return {"ok": False, "error": str(ex), "trace": tb}
+        return {"ok": False, "error": str(ex), "trace": traceback.format_exc()}
+
+# -----------------------------------------------------------------------------
+# Циклический опрос тегов
+# -----------------------------------------------------------------------------
+@router.post("/is_polling")
+async def is_polling(req: PollingRequest):
+    task_id = f"{req.endpoint_url}:" + ",".join([t.node_id for t in req.tags])
+    running = tasks_manager.is_running(task_id)
+    return {"ok": True, "running": running}
+
+@router.post("/start_polling")
+async def start_polling(req: PollingRequest):
+    endpoint_url = req.endpoint_url
+    tags = req.tags
+    interval = req.interval
+    task_id = f"{endpoint_url}:" + ",".join([t.node_id for t in tags])
+
+    async def poll_and_save():
+        # подготовка: сервер и теги в БД
+        tag_dicts = [t.dict() for t in tags]
+        with _db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT Id FROM OpcServers WHERE EndpointUrl = ?", endpoint_url)
+            row = cur.fetchone()
+            if not row:
+                return
+            server_id = row[0]
+            nodeid_to_tagid = ensure_tags_and_get_ids(conn, server_id, tag_dicts)
+
+        client = await get_configured_client(
+            endpoint_url,
+            username=req.username,
+            password=req.password,
+            security_policy=req.security_policy,
+            security_mode=req.security_mode
+        )
+
+        async with client:
+            while True:
+                try:
+                    values = []
+                    for t in tags:
+                        try:
+                            val = await client.get_node(t.node_id).read_value()
+                            values.append((t.node_id, val, datetime.datetime.now()))
+                        except Exception as e:
+                            # лог и продолжить
+                            continue
+                    if values:
+                        with _db() as conn:
+                            cur = conn.cursor()
+                            for node_id, val, dt in values:
+                                tag_id = nodeid_to_tagid.get(node_id)
+                                if tag_id:
+                                    cur.execute(
+                                        "INSERT INTO OpcData (TagId, Value, Timestamp) VALUES (?, ?, ?)",
+                                        tag_id, val, dt)
+                            conn.commit()
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    await asyncio.sleep(interval)
+
+    # регистрация фоновой задачи
+    if not tasks_manager.start(task_id, poll_and_save()):
+        return {"ok": False, "message": "Уже выполняется"}
+    return {"ok": True, "message": "Циклический опрос запущен"}
+
+@router.post("/stop_polling")
+async def stop_polling(req: StopPollingRequest):
+    tasks_manager.stop(req.task_id)
+    return {"ok": True, "message": "Опрос остановлен"}

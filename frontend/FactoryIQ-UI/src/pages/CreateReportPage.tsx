@@ -745,9 +745,8 @@ const CreateReportPage: React.FC = () => {
           </select>
         </div>
 
-        {/* Поиск и добавление тегов */}
         <div className={styles.reportSectionTitle}>Добавление тегов в отчёт</div>
-        <div className={styles.tagSearchBlock}>
+        <div className={`${styles.tagSearchBlock} ${styles.tagSearch}`}>
           <input
             ref={inputRef}
             type="text"
@@ -756,14 +755,13 @@ const CreateReportPage: React.FC = () => {
             value={filter}
             onFocus={handleInputFocus}
             onBlur={handleInputBlur}
-            onChange={(e) => {
-              setFilter(e.target.value);
-              setDropdownOpen(true);
-            }}
+            onChange={(e) => { setFilter(e.target.value); setDropdownOpen(true); }}
             autoComplete="off"
+            aria-expanded={dropdownOpen}
+            aria-controls="tag-dropdown"
           />
           {dropdownOpen && (
-            <div className={styles.dropdownList}>
+            <div id="tag-dropdown" className={styles.dropdownList} role="listbox">
               {filteredTags.length === 0 && filter && (
                 <div className={styles.dropdownEmpty}>Теги не найдены</div>
               )}
@@ -771,19 +769,13 @@ const CreateReportPage: React.FC = () => {
                 <div
                   key={tag.id}
                   className={styles.dropdownItem}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    handleTagSelect(tag);
-                  }}
+                  onMouseDown={(e) => { e.preventDefault(); handleTagSelect(tag); }}
                 >
                   <span className={styles.dropdownTagName}>
                     {tag.browse_name || tag.name}
                   </span>
                   {tag.description && (
-                    <span
-                      className={styles.dropdownTagDesc}
-                      title={tag.description}
-                    >
+                    <span className={styles.dropdownTagDesc} title={tag.description}>
                       {tag.description}
                     </span>
                   )}
@@ -795,15 +787,18 @@ const CreateReportPage: React.FC = () => {
 
         {/* Список выбранных тегов */}
         <div className={styles.reportTagRow}>
-          {selectedTags.length === 0 && (
-            <div className={styles.reportTagsEmpty}>Теги не выбраны</div>
-          )}
-          {selectedTags.map((t) => (
-            <div key={t.id} className={styles.reportTagBox}>
-              {t.tag.description || t.tag.browse_name || t.tag.name}
-              <span onClick={() => removeTag(t.id)}>×</span>
-            </div>
-          ))}
+          <div className={styles.selectedTagsWrap}>
+            {selectedTags.length === 0 && (
+              <div className={styles.reportTagsEmpty}>Теги не выбраны</div>
+            )}
+            {selectedTags.map((t) => (
+              <div key={t.id} className={styles.reportTagBox}>
+                {t.tag.description || t.tag.browse_name || t.tag.name}
+                <span onClick={() => removeTag(t.id)} role="button" aria-label="Удалить тег">×</span>
+              </div>
+            ))}
+            {/* кнопка рандома при желании можно добавить сюда */}
+          </div>
         </div>
 
         {/* --- Блок общих настроек для отчёта --- */}
@@ -956,7 +951,7 @@ const CreateReportPage: React.FC = () => {
                         <td>{row.Date || "-"}</td>
                         <td>{row["Смена"] ?? "-"}</td>
                         {selectedTags.map((t, i) => {
-                          const key = t.tag.browse_name;
+                          const key = getTagKey(t.tag);
                           const val = row[`Value_${t.tag.id}`] ?? row[key];
                           return (
                             <td key={i}>
@@ -971,7 +966,7 @@ const CreateReportPage: React.FC = () => {
                       <tr style={{ fontWeight: "bold", background: "#e3fbfa" }}>
                         <td colSpan={2}>Итого</td>
                         {selectedTags.map((t, i) => {
-                          const tagKey = t.tag.browse_name;
+                          const tagKey = getTagKey(t.tag); // определяем один раз
                           return (
                             <td key={i}>
                               {totals[tagKey]?.toLocaleString("ru-RU", {
@@ -980,6 +975,7 @@ const CreateReportPage: React.FC = () => {
                             </td>
                           );
                         })}
+
                       </tr>
                     )}
                   </tbody>

@@ -1,0 +1,129 @@
+SET IDENTITY_INSERT OpcTags ON;
+
+INSERT INTO OpcTags (Id, BrowseName, NodeId, DataType, Description, Path, ServerId)
+VALUES
+(21, 'PressSpeed',           'TEST.PRESS_SPEED',      '10', 'Скорость пресса, об/мин',                  'Пресс', 1),
+(22, 'DryerAirTemp',         'TEST.DRYER_AIR_TEMP',   '10', 'Температура воздуха на выходе сушилки, °C','Сушилка', 1),
+(23, 'SeedMoisture',         'TEST.SEED_MOISTURE',    '10', 'Влажность семян, %',                       'Силос', 1),
+(24, 'VentilationRate',      'TEST.VENT_RATE',        '10', 'Расход вентиляции, м³/ч',                  'Вентиляция', 1),
+(25, 'FilterDP',             'TEST.FILTER_DP',        '10', 'Перепад давления на фильтре, кПа',         'Фильтр', 1),
+(26, 'SolventTemp',          'TEST.SOLVENT_TEMP',     '10', 'Температура растворителя, °C',             'Экстрактор', 1),
+(27, 'HydraulicPressure',    'TEST.HYDRAULIC_PRESS',  '10', 'Давление в гидросистеме, бар',             'Гидравлика', 1),
+(28, 'SeedFlowSetpoint',     'TEST.SEED_FLOW_SP',     '10', 'Уставка расхода семян, т/ч',               'Дозатор', 1),
+(29, 'CycloneLoss',          'TEST.CYCLONE_LOSS',     '10', 'Потери в циклоне, кг/ч',                   'Циклон', 1),
+(30, 'AirCompLoad',          'TEST.AIRCOMP_LOAD',     '10', 'Загрузка компрессора, %',                  'Компрессор', 1);
+
+SET IDENTITY_INSERT OpcTags OFF;
+
+-- ОЧИСТКА только для тестовых TagId (21...30)
+DELETE FROM OPCData WHERE TagId BETWEEN 21 AND 30;
+SET LANGUAGE us_english;
+
+DECLARE @dt DATETIME = '2025-01-01 00:00:00';
+DECLARE @end DATETIME = '2025-07-01 00:00:00';
+
+DECLARE 
+    @PressSpeed          DECIMAL(7,2),
+    @DryerAirTemp        DECIMAL(7,2),
+    @SeedMoisture        DECIMAL(7,2),
+    @VentilationRate     DECIMAL(10,2),
+    @FilterDP            DECIMAL(7,2),
+    @SolventTemp         DECIMAL(7,2),
+    @HydraulicPressure   DECIMAL(7,2),
+    @SeedFlowSetpoint    DECIMAL(7,2),
+    @CycloneLoss         DECIMAL(7,2),
+    @AirCompLoad         DECIMAL(7,2);
+
+-- Начальные значения (реалистичные)
+SET @PressSpeed        = 38;      -- об/мин
+SET @DryerAirTemp      = 93;      -- °C
+SET @SeedMoisture      = 7.3;     -- %
+SET @VentilationRate   = 15000;   -- м³/ч
+SET @FilterDP          = 5.0;     -- кПа
+SET @SolventTemp       = 56;      -- °C
+SET @HydraulicPressure = 118;     -- бар
+SET @SeedFlowSetpoint  = 60;      -- т/ч
+SET @CycloneLoss       = 11;      -- кг/ч
+SET @AirCompLoad       = 63;      -- %
+
+WHILE @dt < @end
+BEGIN
+    -- 1. Скорость пресса (норма 36-40, аварии: просадки)
+    IF DATEPART(MINUTE, @dt) = 0 AND DATEPART(HOUR, @dt) IN (6,15) AND DATEPART(DAY, @dt) % 11 = 0
+        SET @PressSpeed = 30 + RAND()*2;  -- просадка скорости (авария)
+    ELSE IF RAND() < 0.05
+        SET @PressSpeed = 38 + RAND()*3;
+    ELSE
+        SET @PressSpeed = 37 + RAND()*2.3;
+
+    -- 2. Температура воздуха сушилки (93-98, ночью ниже)
+    IF DATEPART(HOUR, @dt) BETWEEN 22 AND 5
+        SET @DryerAirTemp = 92 + RAND()*2.5;
+    ELSE
+        SET @DryerAirTemp = 94 + RAND()*3.8;
+
+    -- 3. Влажность семян (7-9%)
+    IF DATEPART(HOUR, @dt) IN (4,14,22) AND RAND()<0.1
+        SET @SeedMoisture = 6.9 + RAND()*1.4; -- просушка
+    ELSE
+        SET @SeedMoisture = 7.4 + RAND()*1.1;
+
+    -- 4. Расход вентиляции (день: 15000-17000, ночь: 10000-12000)
+    IF DATEPART(HOUR, @dt) BETWEEN 8 AND 20
+        SET @VentilationRate = 15200 + RAND()*1800;
+    ELSE
+        SET @VentilationRate = 10500 + RAND()*2000;
+
+    -- 5. Перепад на фильтре (чистка раз в 7 дней)
+    IF DATEPART(DAY, @dt) % 7 = 0 AND DATEPART(HOUR, @dt) = 5 AND DATEPART(MINUTE, @dt)=0
+        SET @FilterDP = 2.5 + RAND(); -- чистка: падение
+    ELSE
+        SET @FilterDP = 4.7 + RAND()*2.1;
+
+    -- 6. Темп. растворителя (55-59, аварии: >60)
+    IF DATEPART(DAY, @dt) % 15 = 0 AND DATEPART(HOUR, @dt) = 19
+        SET @SolventTemp = 61.0 + RAND()*1.2;
+    ELSE
+        SET @SolventTemp = 55.8 + RAND()*3.1;
+
+    -- 7. Давление гидравлики (110-122 бар)
+    IF RAND() < 0.025
+        SET @HydraulicPressure = 112 + RAND()*6;
+    ELSE
+        SET @HydraulicPressure = 116 + RAND()*6;
+
+    -- 8. Уставка расхода семян (плавные изменения, ±1 т/ч раз в 8 ч)
+    IF DATEPART(HOUR, @dt) % 8 = 0 AND DATEPART(MINUTE, @dt)=0
+        SET @SeedFlowSetpoint = 58 + RAND()*6;
+    ELSE
+        SET @SeedFlowSetpoint = @SeedFlowSetpoint + (RAND()-0.5)*0.02; -- малый дрейф
+
+    -- 9. Потери в циклоне (обычно 8-14, выбросы)
+    IF DATEPART(DAY, @dt) % 17 = 0 AND DATEPART(HOUR, @dt) = 2
+        SET @CycloneLoss = 18 + RAND()*2.5;
+    ELSE
+        SET @CycloneLoss = 9.5 + RAND()*4;
+
+    -- 10. Загрузка компрессора (обычно 60-80%)
+    IF RAND()<0.03
+        SET @AirCompLoad = 70 + RAND()*15;
+    ELSE
+        SET @AirCompLoad = 61 + RAND()*19;
+
+    -- Вставка
+    INSERT INTO OPCData (TagId, [Value], [Timestamp])
+    VALUES 
+    (21, @PressSpeed,         @dt),
+    (22, @DryerAirTemp,       @dt),
+    (23, @SeedMoisture,       @dt),
+    (24, @VentilationRate,    @dt),
+    (25, @FilterDP,           @dt),
+    (26, @SolventTemp,        @dt),
+    (27, @HydraulicPressure,  @dt),
+    (28, @SeedFlowSetpoint,   @dt),
+    (29, @CycloneLoss,        @dt),
+    (30, @AirCompLoad,        @dt);
+
+    -- Следующая минута
+    SET @dt = DATEADD(MINUTE, 1, @dt);
+END

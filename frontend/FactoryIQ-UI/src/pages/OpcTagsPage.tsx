@@ -263,45 +263,47 @@ const OpcTagsPage: React.FC = () => {
   }, []);
 
 
+
   return (
-    <div className={styles.page} style={{ minWidth: 0 }}>
+    <div className={styles.page}>
+      {/* --- ХЕДЕР --- */}
       <div className={styles.header}>
         <BackButton />
-        <span className={styles.headerIcon}>🏷️</span> Управление OPC UA тегами
-        {/* --- ИНДИКАТОР СОЕДИНЕНИЯ С PLC --- */}
-        <span style={{ marginLeft: 30, display: "flex", alignItems: "center", gap: 7 }}>
+        <span className={styles.headerIcon}>🏷️</span>
+        Управление OPC UA тегами
+        <span className={styles.status}>
           {plcStatus === "online" && (
             <>
-              <CheckCircle size={22} color="#4CAF50" style={{ verticalAlign: "middle" }} />
-              <span style={{ color: "#3dc668", fontWeight: 600 }}>PLC: Online</span>
+              <CheckCircle size={22} className={styles.statusIconOnline} />
+              <span className={styles.statusTextOnline}>PLC: Online</span>
             </>
           )}
           {plcStatus === "offline" && (
             <>
-              <XCircle size={22} color="#ff4343" style={{ verticalAlign: "middle" }} />
-              <span style={{ color: "#ff4343", fontWeight: 600 }}>PLC: Offline</span>
+              <XCircle size={22} className={styles.statusIconOffline} />
+              <span className={styles.statusTextOffline}>PLC: Offline</span>
             </>
           )}
           {plcStatus === "pending" && (
             <>
-              <AlertTriangle size={22} color="#e4b600" style={{ verticalAlign: "middle" }} />
-              <span style={{ color: "#e4b600", fontWeight: 600 }}>PLC: Проверка...</span>
+              <AlertTriangle size={22} className={styles.statusIconPending} />
+              <span className={styles.statusTextPending}>PLC: Проверка...</span>
             </>
           )}
         </span>
       </div>
 
-
-
-      <div style={{ marginBottom: 16 }}>
-        <label>Сервер:&nbsp;
+      {/* --- ВЫБОР СЕРВЕРА --- */}
+      <div className={styles.field}>
+        <label>
+          Сервер:&nbsp;
           <select
             value={selectedServer?.id || ""}
             onChange={e => {
               const srv = servers.find(s => s.id === Number(e.target.value));
               setSelectedServer(srv || null);
             }}
-            style={{ minWidth: 300, padding: 4 }}
+            className={styles.select}
           >
             {servers.map(server => (
               <option key={server.id} value={server.id}>
@@ -311,59 +313,53 @@ const OpcTagsPage: React.FC = () => {
           </select>
         </label>
       </div>
-      {/* === Интервал перед запуском === */}
-      <div style={{ margin: "0 0 12px 0" }}>
-        <label>Интервал опроса:&nbsp;
+
+      {/* --- ИНТЕРВАЛ --- */}
+      <div className={styles.field}>
+        <label>
+          Интервал опроса:&nbsp;
           <select
             value={selectedIntervalId}
             onChange={e => setSelectedIntervalId(Number(e.target.value))}
-            style={{ minWidth: 180, padding: 4 }}
+            className={styles.select}
           >
             {intervals.map(i => (
-              <option key={i.id} value={i.id}>{i.name} ({i.intervalSeconds} сек)</option>
+              <option key={i.id} value={i.id}>
+                {i.name} ({i.intervalSeconds} сек)
+              </option>
             ))}
           </select>
         </label>
       </div>
+
       <div className={styles.desc}>
         Просмотр, поиск, редактирование и удаление тегов <b>OpcTags</b>
       </div>
-      {/* КНОПКИ УПРАВЛЕНИЯ LIVE */}
-      <div style={{ margin: "14px 0 12px 0", display: "flex", gap: 14 }}>
-        <button
-          className={styles.button}
-          style={{ background: "#f7faff", color: "#0aa", fontWeight: 700 }}
-          onClick={() => {
-            const tagIds = tags.map(t => t.id);
-            fetchLiveValues(tagIds);
-          }}
-        >
+
+      {/* --- КНОПКИ LIVE --- */}
+      <div className={styles.actions}>
+        <button className={`${styles.button} ${styles.buttonRefresh}`} onClick={() => {
+          const tagIds = tags.map(t => t.id);
+          fetchLiveValues(tagIds);
+        }}>
           🔄 Обновить значения (ручной запрос)
         </button>
         <button
-          className={styles.button}
-          style={{
-            background: autoRefresh ? "#d3ffe4" : "#fff",
-            color: autoRefresh ? "#159a52" : "#aaa",
-            fontWeight: 700
-          }}
+          className={`${styles.button} ${autoRefresh ? styles.buttonAutoOn : styles.buttonAutoOff}`}
           onClick={() => setAutoRefresh(v => !v)}
         >
           {autoRefresh ? "⏸ Остановить автообновление" : "▶️ Включить автообновление (10 сек)"}
         </button>
       </div>
-      {/* --- КНОПКА ЗАПУСКА ОПРОСА --- */}
-      <div style={{ margin: "18px 0 8px 0" }}>
-        <button
-          className={styles.button}
-          style={{ background: "#e7fff4", color: "#159a52", fontWeight: 700 }}
-          onClick={handleStartPolling}
-        >
+
+      {/* --- КНОПКА ОПРОСА --- */}
+      <div className={styles.actions}>
+        <button className={`${styles.button} ${styles.buttonStart}`} onClick={handleStartPolling}>
           ▶️ Запустить опрос выбранных тегов
         </button>
       </div>
-      {/* -------------------------------- */}
 
+      {/* --- ФИЛЬТРЫ --- */}
       <div className={styles.tableFilters}>
         <input
           className={styles.input}
@@ -407,11 +403,12 @@ const OpcTagsPage: React.FC = () => {
         </span>
       </div>
 
-      <div style={{ width: "100%", maxWidth: "none" }}>
-        <table className={styles.table} style={{ width: "99vw", minWidth: 1280, maxWidth: "100%" }}>
+      {/* --- ТАБЛИЦА --- */}
+      <div className={styles.tableViewport}>
+        <table className={styles.table}>
           <thead>
             <tr>
-              <th style={{ width: 38 }}>
+              <th>
                 <input
                   type="checkbox"
                   checked={checkedTagIds.length === tags.length && tags.length > 0}
@@ -423,14 +420,14 @@ const OpcTagsPage: React.FC = () => {
                   title="Выбрать все"
                 />
               </th>
-              <th style={{ minWidth: 80, maxWidth: 140 }}>Имя</th>
-              <th style={{ minWidth: 150, maxWidth: 310 }}>Node ID</th>
-              <th style={{ width: 80 }}>Тип</th>
-              <th style={{ minWidth: 210, maxWidth: 350 }}>Путь</th>
-              <th style={{ width: 90 }}>Значение</th>
-              <th style={{ width: 150 }}>Дата/Время</th>
-              <th style={{ width: 200 }}>Описание</th>
-              <th style={{ width: 60 }}></th>
+              <th>Имя</th>
+              <th>Node ID</th>
+              <th>Тип</th>
+              <th>Путь</th>
+              <th>Значение</th>
+              <th>Дата/Время</th>
+              <th>Описание</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -449,36 +446,19 @@ const OpcTagsPage: React.FC = () => {
                     }}
                   />
                 </td>
-                <td style={{
-                  maxWidth: 140,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis"
-                }}>{tag.browse_name}</td>
-                <td style={{
-                  maxWidth: 300,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis"
-                }}>{tag.node_id}</td>
+                <td className={styles.cellTruncate}>{tag.browse_name}</td>
+                <td className={styles.cellTruncate}>{tag.node_id}</td>
                 <td>{tag.data_type}</td>
-                <td style={{
-                  maxWidth: 350,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis"
-                }}>{tag.path}</td>
-                {/* Значение */}
-                <td style={{ color: "#22938e", fontWeight: 600, fontFamily: "monospace" }}>
+                <td className={styles.cellTruncate}>{tag.path}</td>
+                <td className={styles.valueCell}>
                   {liveValues[tag.id] !== undefined && liveValues[tag.id] !== null
                     ? (typeof liveValues[tag.id].value === "number"
                       ? liveValues[tag.id].value.toFixed(2)
                       : String(liveValues[tag.id].value))
-                    : <span style={{ color: "#aaa" }}>–</span>
+                    : <span className={styles.valueEmpty}>–</span>
                   }
                 </td>
-                {/* Дата/Время */}
-                <td style={{ color: "#aaa", fontSize: 12 }}>
+                <td className={styles.timestampCell}>
                   {liveValues[tag.id] && liveValues[tag.id].timestamp
                     ? new Date(liveValues[tag.id].timestamp).toLocaleString()
                     : ""}
@@ -486,7 +466,6 @@ const OpcTagsPage: React.FC = () => {
                 <td>
                   <input
                     className={styles.input}
-                    style={{ width: "97%" }}
                     value={tag.description ?? ""}
                     onChange={e => {
                       const value = e.target.value;
@@ -506,7 +485,8 @@ const OpcTagsPage: React.FC = () => {
                   />
                 </td>
                 <td>
-                  <button className={styles.button} style={{ background: "#ffd6d6", color: "#e12d2d", fontWeight: 700 }}
+                  <button
+                    className={`${styles.button} ${styles.buttonDelete}`}
                     onClick={() => handleDelete(tag.id)}
                   >
                     Удалить
@@ -516,13 +496,15 @@ const OpcTagsPage: React.FC = () => {
             ))}
             {tags.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "#aaa", fontStyle: "italic" }}>Нет тегов</td>
+                <td colSpan={9} className={styles.noData}>Нет тегов</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      <div style={{ margin: "20px 0", display: "flex", gap: 14, alignItems: "center" }}>
+
+      {/* --- ПАГИНАЦИЯ --- */}
+      <div className={styles.pagination}>
         <button className={styles.button} onClick={() => fetchTags(1)}>Обновить</button>
         <button className={styles.button} onClick={resetFilters}>Сбросить фильтры</button>
         <span>Показано: {tags.length} из {total}</span>
@@ -530,10 +512,10 @@ const OpcTagsPage: React.FC = () => {
         <span>Страница {page}</span>
         <button className={styles.button} disabled={(page * PAGE_SIZE) >= total} onClick={() => fetchTags(page + 1)}>{">"}</button>
       </div>
-      {loading && <div style={{ color: "#19acac", margin: "18px 0" }}>Загрузка...</div>}
+
+      {loading && <div className={styles.loading}>Загрузка...</div>}
     </div>
   );
-
 
 };
 

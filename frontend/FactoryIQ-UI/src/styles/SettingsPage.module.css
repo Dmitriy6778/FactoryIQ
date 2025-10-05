@@ -1,9 +1,24 @@
+:root {
+    --oil-amber: #ffca28;
+    --oil-500: #fb8c00;
+    /* янтарь */
+    --oil-600: #f57c00;
+    /* масло */
+    --oil-700: #ef6c00;
+    --seed-900: #19130d;
+    /* семечка */
+    --seed-700: #2a2118;
+    --shadow-warm: 0 6px 24px rgba(239, 108, 0, 0.16);
+    --shadow-strong: 0 10px 28px rgba(239, 108, 0, 0.25);
+}
+
+/* === Страница === */
 .startPage {
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #f7f7fa;
+    background: #fff;
 }
 
 .centerWrapper {
@@ -17,15 +32,13 @@
 .card {
     background: #fff;
     border-radius: 18px;
-    box-shadow: 0 8px 32px rgba(100, 100, 140, .15);
-    padding: 2.7rem 2.7rem 2.7rem 2.7rem;
+    box-shadow: var(--shadow-warm);
+    padding: 2rem 2.5rem;
     width: auto;
-    max-width: unset;
     min-width: 1200px;
-    /* Было 940 или 1100px, теперь точно хватит для трех колонок */
     text-align: left;
+    border: 1px solid #ffe0b2;
 }
-
 
 .logoWrap {
     margin-bottom: 0.8rem;
@@ -39,15 +52,16 @@
 
 .title {
     font-family: 'Montserrat', 'Arial', sans-serif;
-    font-weight: 700;
+    font-weight: 800;
     font-size: 2.3rem;
     margin: 0 0 0.2rem 0;
     letter-spacing: 1px;
     text-align: center;
+    color: var(--seed-900);
 }
 
 .subtitle {
-    color: #282c3c;
+    color: var(--seed-700);
     font-size: 1.04rem;
     font-weight: 400;
     margin-bottom: 1.3rem;
@@ -55,254 +69,153 @@
     text-align: center;
 }
 
-/* === ГЛАВНАЯ 3-КОЛОНОЧНАЯ СЕТКА === */
+/* === Сводная панель === */
+.summaryPanel {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0.9rem 1.2rem;
+    margin: 1rem 0 1.6rem;
+    border-radius: 14px;
+    background: linear-gradient(90deg, #fff8e1 0%, #ffecb3 100%);
+    box-shadow: 0 2px 10px rgba(239, 108, 0, 0.12);
+}
+
+.summaryItem {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.98rem;
+    font-weight: 600;
+    font-family: 'Montserrat', 'Arial', sans-serif;
+    color: var(--seed-900);
+}
+
+.statusIconOk {
+    color: #43a047;
+}
+
+.statusIconErr {
+    color: #e53935;
+}
+
+/* === Основная сетка === */
 .mainGrid3col {
     display: grid;
-    grid-template-columns: 440px 430px 265px;
-    /* Увеличены все колонки */
-    gap: 2.5rem;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2rem;
     align-items: flex-start;
     margin-top: 12px;
     width: 100%;
-    max-width: 1220px;
-    /* Чтобы было с запасом */
-    min-width: 1200px;
 }
 
-.stepsColumn {
-    border-right: 1px solid #191e2e;
-    background: linear-gradient(120deg, #151a2b 60%, #212d44 100%);
-    padding: 2.2rem 1.8rem 2.2rem 1.7rem;
-    /* было меньше, теперь больше воздуха */
-    min-width: 400px;
-    min-height: 590px;
-    border-radius: 18px 0 0 18px;
-    box-shadow: 0 1px 16px #10142627;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
+.block {
+    background: #fffefc;
+    border: 1px solid #ffe0b2;
+    border-radius: 14px;
+    padding: 1.2rem 1.4rem;
+    box-shadow: 0 2px 12px rgba(239, 108, 0, 0.06);
 }
 
-.formColumn {
-    padding-left: 1.6rem;
-    min-width: 360px;
-    box-sizing: border-box;
-}
-
-
-
-.stepperWrap {
-    margin: 0 0 2.1rem 0;
-}
-
-.progressBar {
-    width: 100%;
-    height: 6px;
-    background: #e2ecff;
-    border-radius: 8px;
-    overflow: hidden;
-    margin-bottom: 1.1rem;
-}
-
-.progressInner {
-    height: 100%;
-    background: linear-gradient(90deg, #0fffc7 0%, #0059ff 100%);
-    transition: width 0.5s cubic-bezier(.5, 2, .5, 1);
-    border-radius: 8px;
-}
-
-.stepsList {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.stepItem {
-    display: flex;
-    align-items: center;
-    padding: 0.50rem 0.2rem 0.50rem 0.4rem;
-    border-radius: 10px;
-    background: transparent;
-    margin-bottom: 0.13rem;
-    transition: background 0.18s, color 0.2s;
-    color: #d3e3f8;
+.block h3 {
     font-family: 'Montserrat', 'Arial', sans-serif;
-    font-size: 1.13rem;
-    letter-spacing: 0.01em;
-}
-
-.active {
-    background: linear-gradient(90deg, #00ffc6 10%, #0059ff 85%);
-    color: #00334c !important;
-    /* Темно-синий или можешь поставить #111 */
-    box-shadow: 0 2px 22px #00ffc651;
-    font-weight: bold;
-}
-
-.done {
-    opacity: 0.82;
-    color: #7cffde;
-}
-
-.stepLabel {
+    font-size: 1.2rem;
     font-weight: 700;
-    font-size: 1.17rem;
-    color: inherit;
+    margin-bottom: 1rem;
+    color: var(--oil-700);
 }
 
-.stepDesc {
-    font-size: 0.97rem;
-    margin-top: 0.09rem;
-    margin-left: 0.1rem;
-    letter-spacing: 0.01em;
-    color: inherit;
-}
-
-.stepNum {
-    font-weight: 700;
-    width: 2.2rem;
-    height: 2.2rem;
-    border-radius: 50%;
-    background: #19294b;
-    color: #01e1ff;
-    font-size: 1.18rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 1.2rem;
-    border: 2px solid #00ffc6;
-    box-shadow: 0 2px 8px #00ffc63c;
-}
-
-.iconDone {
-    color: #19ffa7;
-    margin-right: 1.15rem;
-    margin-top: 2px;
-}
-
-.chevron {
-    color: #02428d;
-    margin-left: auto;
-    margin-right: 10px;
-    min-width: 1.2rem;
-}
-
-.formArea {
-    margin-top: 0.3rem;
-}
-
-.fieldsGrid {
-    display: grid;
-    gap: 0.67rem 1.1rem;
-}
-
-.inputGroup {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    margin-bottom: 0.35rem;
-}
-
+/* === Формы === */
 .inputGroup label {
-    font-weight: 500;
-    font-size: 1.03rem;
-    color: #223366;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--seed-700);
     margin-bottom: 0.25rem;
-    margin-left: 0.05rem;
 }
 
 .input {
-    width: 320px;
-    /* фикс ширина! */
-    max-width: 100%;
-    min-width: 220px;
-    padding: 0.5rem 0.9rem;
+    width: 100%;
+    padding: 0.5rem 0.8rem;
     border-radius: 7px;
-    border: 1px solid #dde2f3;
-    font-size: 0.98rem;
-    margin-bottom: 0.05rem;
-    background: #f8fafc;
-    transition: border .2s;
+    border: 1px solid #ffe0b2;
+    font-size: 0.95rem;
+    background: #fffdf7;
+    transition: border 0.2s;
     box-sizing: border-box;
 }
-
 
 .input:focus {
-    border: 1.5px solid #00ffc6;
+    border: 1.5px solid var(--oil-600);
     outline: none;
+    background: #fff8e1;
 }
 
-.miniBtn {
-    font-size: 1.2rem;
-    background: #ebf8ff;
-    color: #0059ff;
-    border-radius: 7px;
-    padding: 0.38rem 0.82rem;
-    border: none;
-    margin-left: 0.25rem;
-    margin-top: 0.03rem;
+textarea.textarea {
+    width: 100%;
+    min-height: 200px;
+    font-size: 0.9rem;
+    font-family: monospace;
+    background: #fffdf7;
+    border: 1px solid #ffe0b2;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    resize: vertical;
+    margin-bottom: 0.8rem;
+}
+
+/* === Кнопки === */
+button {
     cursor: pointer;
-    transition: background 0.13s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--oil-amber), var(--oil-600));
+    color: var(--seed-900);
+    font-weight: 700;
+    padding: 0.6rem 1rem;
+    margin-top: 0.4rem;
+    font-size: 0.95rem;
+    transition: box-shadow 0.15s, transform 0.1s;
 }
 
-.miniBtn:disabled {
-    opacity: 0.42;
-    pointer-events: none;
-    filter: grayscale(50%);
+button:hover:not(:disabled) {
+    box-shadow: var(--shadow-strong);
+    transform: translateY(-1px);
 }
 
-.stepBtnsRow {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    align-items: stretch;
-    margin-top: 0.8rem;
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
-.buttonsColumn {
-    padding-left: 0.5rem;
-    min-width: 220px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    gap: 0.73rem;
-    /* побольше вертикальный отступ */
-}
-
-.bigBtn {
-    font-family: 'Montserrat', 'Arial', sans-serif;
-    font-size: 1.03rem;
-    padding: 11px 0;
+/* === Лог === */
+.logBlock {
+    margin-top: 2rem;
+    padding: 1rem 1.4rem;
+    border: 1px solid #ffe0b2;
     border-radius: 12px;
-    margin: 0.04rem 0;
-    border: none;
-    cursor: pointer;
-    transition: box-shadow .17s, background .17s;
-    box-shadow: 0 2px 16px #00ffc69e;
-    background: linear-gradient(90deg, #0fffc7 0%, #0059ff 100%);
-    color: #191c22;
-    font-weight: bold;
-    width: 97%;
-    align-self: center;
+    background: #fffdf7;
 }
 
-.bigBtn:hover:not(:disabled) {
-    box-shadow: 0 4px 18px #00ffc6a8;
-    background-position: 100% 0;
+.logBlock h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.6rem;
+    font-weight: 700;
+    color: var(--oil-700);
 }
 
-.disabled {
-    opacity: 0.45;
-    pointer-events: none;
-    filter: grayscale(60%);
-    box-shadow: none;
+.logArea {
+    max-height: 220px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.9rem;
+    background: #fff;
+    border: 1px solid #ffe0b2;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    line-height: 1.4;
 }
 
+/* Loader */
 .loader {
     vertical-align: middle;
     animation: spin 0.75s linear infinite;
@@ -314,37 +227,16 @@
     }
 }
 
-.statusOk {
-    color: #0b22a0;
-    font-weight: bold;
-    margin-top: 14px;
-}
-
-.statusError {
-    color: #ff2e6d;
-    font-weight: bold;
-    margin-top: 14px;
-}
-
-/* Для адаптива — одна колонка на мобиле */
+/* Адаптив */
 @media (max-width: 1100px) {
     .mainGrid3col {
         grid-template-columns: 1fr;
         gap: 1.2rem;
-        min-width: unset;
-        max-width: 99vw;
-    }
-
-    .stepsColumn,
-    .formColumn,
-    .buttonsColumn {
-        border: none;
-        padding: 0;
-        min-width: unset;
     }
 
     .card {
-        max-width: 99vw;
-        padding: 1rem 0.6rem 1.7rem 0.6rem;
+        max-width: 95vw;
+        min-width: unset;
+        padding: 1rem;
     }
 }

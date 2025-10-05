@@ -1,11 +1,42 @@
-/* App.css */
+/* сброс и фикс корня */
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+}
+
+/* никаких полос прокрутки у документа */
+html {
+    overflow: hidden;
+}
 
 body {
-    margin: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #f5f6f8;
-    color: #333;
+    overflow: hidden;
+    /* лишнее, но оставим для надёжности */
+    background: var(--bg, #fff);
 }
+
+/* горизонталь убираем, вертикаль оставим по страницам */
+
+
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+html,
+body,
+#root,
+.startPage {
+    outline: 1px solid red;
+}
+
 
 a {
     text-decoration: none;

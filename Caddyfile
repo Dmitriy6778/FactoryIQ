@@ -1,0 +1,15 @@
+﻿:80 {
+    encode gzip
+    root * D:/My_Business/AltaiMai/FactoryIQ/frontend/FactoryIQ-UI/dist
+    file_server
+
+    @api path /telegram* /tg* /reports* /report-styles* /report-templates* /analytics* /db* /tags* /polling* /docs* /openapi.json
+    reverse_proxy @api http://127.0.0.1:8000
+
+    try_files {path} /index.html
+
+    log {
+        output file D:/My_Business/AltaiMai/FactoryIQ/logs/caddy-access.log
+        level info
+    }
+}

@@ -16,8 +16,8 @@ SET IDENTITY_INSERT OpcTags OFF;
 -- Очистить старые тестовые данные (ОСТОРОЖНО! если таблица общая)
 DELETE FROM OPCData WHERE TagId IN (1,2,3,4,5,6,7);
 SET LANGUAGE us_english;
-DECLARE @dt DATETIME = '2025-01-01 00:00:00';
-DECLARE @end DATETIME = '2025-07-01 00:00:00';
+DECLARE @dt DATETIME = '2025-07-01 00:00:00';
+DECLARE @end DATETIME = '2025-08-01 00:00:00';
 
 DECLARE
     @sunflower DECIMAL(12,3),   -- Входящий подсолнечник (TagId=1)

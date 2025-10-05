@@ -54,6 +54,15 @@ class XmlImporter:
         if not present the namespace is registered.
         """
         xml_uris = self.parser.get_used_namespaces()
+
+        # Check if first namespace is the standard namespace and
+        # drop it, to prevent the following code from failing and
+        # misplacing namespace index 1 (user namespace)
+        # to namespace index 0 (server namespace)
+        if xml_uris:
+            if xml_uris[0] == "http://opcfoundation.org/UA/":
+                xml_uris.pop(0)
+
         server_uris = await self.session.get_namespace_array()
         namespaces_map = {}
         for ns_index, ns_uri in enumerate(xml_uris):
@@ -326,6 +335,10 @@ class XmlImporter:
 
         :returns: NodeId (str)
         """
+        # Handle ns=1 without a namespace URI gracefully to not break previous behavior.
+        # These nodes will be added to the local server namespace.
+        if obj.NamespaceIndex > 1 and obj.NamespaceIndex not in self.namespaces:
+            raise UaError(f"Namespace index '{obj.NamespaceIndex}' referenced by '{obj}' is not defined in xml")
         if isinstance(obj, ua.NodeId):
             if obj.NamespaceIndex in self.namespaces:
                 obj = ua.NodeId(
