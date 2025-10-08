@@ -122,6 +122,10 @@ function Do-SetupIIS {
   Ensure-Pool $WebPool
   Ensure-Pool $ApiPool
   Set-ItemProperty ("IIS:\Sites\{0}" -f $SiteName) -Name applicationPool -Value $WebPool
+  # ACL для IIS_IUSRS
+& icacls $FrontProd /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q | Out-Null
+& icacls $BackProd  /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q | Out-Null
+  Ok 'ACL for IIS_IUSRS set on frontend/backend.'
 
   # /api app
   $apiName = $ApiAppPath.TrimStart('/')
@@ -135,28 +139,26 @@ function Do-SetupIIS {
     Info 'IIS application /api updated.'
   }
 
-  # front web.config
+   # front web.config
   $frontCfg = Join-Path $FrontProd 'web.config'
-  if (-not (Test-Path $frontCfg)) {
 @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
-    <staticContent>
-      <remove fileExtension=".json" />
-      <remove fileExtension=".webp" />
-      <remove fileExtension=".woff2" />
-      <remove fileExtension=".svg" />
-      <mimeMap fileExtension=".json"  mimeType="application/json" />
-      <mimeMap fileExtension=".webp"  mimeType="image/webp" />
-      <mimeMap fileExtension=".woff2" mimeType="font/woff2" />
-      <mimeMap fileExtension=".svg"   mimeType="image/svg+xml" />
-    </staticContent>
+
     <rewrite>
       <rules>
-        <rule name="spa-fallback" stopProcessing="true">
+        <!-- НЕ трогаем статику -->
+        <rule name="IgnoreStatic" stopProcessing="true">
+          <match url="^(assets/|.*\.(css|js|png|jpg|jpeg|gif|svg|webp|ico|txt|json|map))$" ignoreCase="true" />
+          <action type="None" />
+        </rule>
+
+        <!-- SPA fallback (кроме /api) -->
+        <rule name="SPA_Fallback" stopProcessing="true">
           <match url=".*" />
-          <conditions logicalGrouping="MatchAll" trackAllCaptures="false">
+          <conditions logicalGrouping="MatchAll">
+            <add input="{REQUEST_URI}" pattern="^/api($|/)" negate="true" />
             <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
             <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
           </conditions>
@@ -164,22 +166,26 @@ function Do-SetupIIS {
         </rule>
       </rules>
     </rewrite>
+
+    <defaultDocument>
+      <files>
+        <clear />
+        <add value="index.html" />
+      </files>
+    </defaultDocument>
+
   </system.webServer>
 </configuration>
-"@ | Out-File -FilePath $frontCfg -Encoding utf8 -Force
-    Ok 'Frontend web.config written.'
-  } else { Info 'Frontend web.config exists.' }
 
-  # back web.config (reverse proxy -> 127.0.0.1:$UvicornPort)
-  $backCfg = Join-Path $BackProd 'web.config'
+"@ | Out-File -FilePath $frontCfg -Encoding ascii -Force
+  Ok 'Frontend web.config written.'
+
+ # back web.config (reverse proxy -> 127.0.0.1:$UvicornPort)
+$backCfg = Join-Path $BackProd 'web.config'
 @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
-    <handlers>
-      <add name="StaticFile" path="*" verb="*" modules="StaticFileModule,DefaultDocumentModule"
-           resourceType="Either" requireAccess="Read" />
-    </handlers>
     <httpProtocol>
       <customHeaders>
         <add name="X-Forwarded-Proto" value="https" />
@@ -192,11 +198,29 @@ function Do-SetupIIS {
           <action type="Rewrite" url="http://127.0.0.1:$UvicornPort/{R:1}" appendQueryString="true" logRewrittenUrl="true" />
         </rule>
       </rules>
+      <outboundRules>
+        <!-- Исправлять абсолютные http://127.0.0.1:$UvicornPort/... в ответах -->
+        <rule name="ReverseProxyOutboundRule1" preCondition="ResponseIsHtml1">
+          <match filterByTags="A, Form, Img, Link, Script" pattern="http://127.0.0.1:$UvicornPort/(.*)" />
+          <action type="Rewrite" value="/{R:1}" />
+        </rule>
+        <preConditions>
+          <preCondition name="ResponseIsHtml1">
+            <add input="{RESPONSE_CONTENT_TYPE}" pattern="^text/html" />
+          </preCondition>
+        </preConditions>
+      </outboundRules>
     </rewrite>
+    <proxy timeout="00:05:00" />
+    <security>
+      <requestFiltering allowDoubleEscaping="true" />
+    </security>
   </system.webServer>
 </configuration>
-"@ | Out-File -FilePath $backCfg -Encoding utf8 -Force
-  Ok 'Backend web.config written.'
+"@ | Out-File -FilePath $backCfg -Encoding ascii -Force
+Ok 'Backend web.config written.'
+
+
 
   # ARR proxy (if installed)
   try {
@@ -292,7 +316,7 @@ function Do-Services {
     $uviex = Join-Path (Split-Path $VenvPython -Parent) 'uvicorn.exe'
   }
   Remove-Service-Force -Name $SvcApi
-  & nssm install $SvcApi $uviex "app.main:app --host 127.0.0.1 --port $UvicornPort --workers 2 --proxy-headers --forwarded-allow-ips 127.0.0.1 --root-path $ApiAppPath" | Out-Null
+  & nssm install $SvcApi $uviex "app.main:app --host 127.0.0.1 --port $UvicornPort --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1 --root-path $ApiAppPath" | Out-Null
   & nssm set $SvcApi AppDirectory $BackProd | Out-Null
   & nssm set $SvcApi AppStdout (Join-Path $logs 'api.out.log') | Out-Null
   & nssm set $SvcApi AppStderr (Join-Path $logs 'api.err.log') | Out-Null
@@ -301,6 +325,11 @@ function Do-Services {
   & nssm set $SvcApi AppRotateBytes 10485760 | Out-Null
   & nssm set $SvcApi AppEnvironmentExtra ("PYTHONUNBUFFERED=1","PYTHONPATH=$BackProd") | Out-Null
   & nssm set $SvcApi Start SERVICE_AUTO_START | Out-Null
+    # Firewall для локального UVicorn
+  try {
+    New-NetFirewallRule -DisplayName "FactoryIQ Uvicorn $UvicornPort" -Direction Inbound -LocalPort $UvicornPort -Protocol TCP -Action Allow -Profile Any | Out-Null
+  } catch {}
+
   & nssm start $SvcApi | Out-Null
   Ok 'Service ready: factoryiq-api'
 
@@ -347,8 +376,73 @@ function Do-Verify {
   Info 'API local check:'
   try { & curl.exe ("http://127.0.0.1:{0}/" -f $UvicornPort) } catch { Warn 'curl.exe local check failed' }
   Info 'API via IIS HTTPS check:'
-  try { & curl.exe ("-k https://{0}{1}/" -f $HostName,$ApiAppPath) } catch { Warn 'curl.exe https check failed' }
+  try { & curl.exe -k ("https://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) } catch { Warn 'curl.exe https check failed' }
+
 }
+function Get-ProcByPort([int]$Port){
+  (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+    Group-Object OwningProcess | ForEach-Object {
+      $_.Group | Select-Object -First 1 | ForEach-Object {
+        [PSCustomObject]@{
+          PID       = $_.OwningProcess
+          Process   = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).Name
+          LocalPort = $_.LocalPort
+        }
+      }
+  })
+}
+
+function Do-Repair {
+  Info '=== REPAIR: quick fixes for 500/API and white screen ==='
+
+  # 1) Перегенерируем web.config-ы (могли съехать)
+  Do-SetupIIS
+
+  # 2) Проверим/перезапустим службы
+  try { sc.exe stop  $SvcApi | Out-Null } catch {}
+  Start-Sleep -Seconds 2
+  try { sc.exe start $SvcApi | Out-Null } catch {}
+  Start-Sleep -Seconds 2
+
+  # 3) Проверим порт UVicorn
+  $p = Get-ProcByPort -Port $UvicornPort
+  if (-not $p) { Warn ("Nothing listens on {0}" -f $UvicornPort) } else { Ok ("Listening on {0}: PID={1} ({2})" -f $UvicornPort,$p.PID,$p.Process) }
+
+  # 4) Быстрые curl-пробы
+  Info 'curl local API:'
+  try { & curl.exe ("http://127.0.0.1:{0}/openapi.json" -f $UvicornPort) } catch { Warn 'Local curl failed' }
+
+  Info 'curl via IIS (HTTP):'
+  try { & curl.exe ("http://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) } catch { Warn 'IIS HTTP curl failed' }
+
+  Info 'curl via IIS (HTTPS, -k):'
+  try { & curl.exe -k ("https://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) } catch { Warn 'IIS HTTPS curl failed' }
+
+  # 5) Статика фронта
+  Info 'curl index.html:'
+  try { & curl.exe ("http://{0}/" -f $HostName) } catch { Warn 'Front curl failed' }
+
+  # 6) Если /api через IIS даёт 500 — покажем подсказки
+  $r = try { (Invoke-WebRequest -UseBasicParsing ("http://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) -Method Head -TimeoutSec 10).StatusCode } catch { $_.Exception.Message }
+  if ($r -isnot [int] -or $r -ge 500) {
+    Warn "IIS /api returns 5xx. Tips:"
+    Write-Host " - Проверьте, что сервис $SvcApi запущен:  sc query $SvcApi" -ForegroundColor Yellow
+    Write-Host " - Логи: $BackProd\logs\api.err.log и api.out.log" -ForegroundColor Yellow
+    Write-Host " - Проверить включён ли ARR и URL Rewrite (переставить MSI при необходимости)" -ForegroundColor Yellow
+  } else {
+    Ok "IIS /api OK."
+  }
+  # 7) Если локальный API или IIS /api падают — показать хвост логов UVicorn
+if ($r -isnot [int] -or $r -ge 500) {
+  $elog = Join-Path $BackProd 'logs\api.err.log'
+  $olog = Join-Path $BackProd 'logs\api.out.log'
+  if (Test-Path $elog) { Info "=== tail api.err.log ==="; Get-Content $elog -Tail 80 }
+  if (Test-Path $olog) { Info "=== tail api.out.log ==="; Get-Content $olog -Tail 40 }
+}
+
+  
+}
+
 
 function Show-Menu {
   Write-Host ''
@@ -361,13 +455,14 @@ function Show-Menu {
   Write-Host '[6] HTTPS: issue self-signed cert and bind'
   Write-Host '[7] Register Windows Services (API / OPC / Reports)'
   Write-Host '[8] Verify (bindings, http.sys, curl)'
+  Write-Host '[9] Repair (rewrite configs, restart API, quick checks)'
   Write-Host '[0] Exit'
   Write-Host '==========================='
 }
 
 do {
   Show-Menu
-  $choice = Read-Host 'Select [0-8]'
+  $choice = Read-Host 'Select [0-9]'
   try {
     switch ($choice) {
       '1' { Do-InstallIIS }
@@ -378,6 +473,7 @@ do {
       '6' { Do-HTTPS }
       '7' { Do-Services }
       '8' { Do-Verify }
+	  '9' { Do-Repair }
       '0' { break }
       default { Write-Host 'Unknown choice' -ForegroundColor Yellow }
     }

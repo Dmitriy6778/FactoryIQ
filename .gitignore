@@ -2,10 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.exe
+*.msi
 # C extensions
 *.so
-
+.env
+.env.production
 # Virtual environments
 venv/
 env/
