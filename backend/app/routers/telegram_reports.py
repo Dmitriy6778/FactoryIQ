@@ -191,12 +191,36 @@ def update_channel(id: int, channel: ChannelUpdate):
 
 @router.delete("/channels/{id}")
 def delete_channel(id: int):
+    """
+    Физическое удаление канала из TelegramReportTarget.
+    Если есть ссылки из ReportSchedule.TargetValue на этот канал —
+    либо запретить удаление (вернуть 409), либо предварительно очистить ссылки.
+    Ниже — вариант «запретить, если используется».
+    """
     try:
         with _db() as conn:
             cur = conn.cursor()
-            cur.execute("UPDATE TelegramReportTarget SET Active=0 WHERE Id=?", id)
+
+            # Проверим, используется ли канал в заданиях (TargetType='telegram' и TargetValue=Id канала)
+            cur.execute("""
+                SELECT COUNT(*) 
+                FROM ReportSchedule 
+                WHERE TargetType = 'telegram' AND TRY_CAST(TargetValue AS INT) = ?
+            """, id)
+            in_use = cur.fetchone()[0] or 0
+            if in_use > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Канал используется в заданиях, сперва удалите/обновите связанные задания"
+                )
+
+            cur.execute("DELETE FROM TelegramReportTarget WHERE Id = ?", id)
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Канал не найден")
             conn.commit()
-            return {"ok": True}
+            return {"ok": True, "deleted": id}
+    except HTTPException:
+        raise
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
@@ -1165,12 +1189,21 @@ def update_report_task(id: int, payload: ReportTaskUpdate):
 
 @router.delete("/tasks/{id}")
 def delete_report_task(id: int):
+    """
+    Физическое удаление задания из ReportSchedule.
+    Если предусмотрены логи/история по заданиям, чистить их здесь же
+    (или выставить ON DELETE CASCADE на FK).
+    """
     try:
         with _db() as conn:
             cur = conn.cursor()
-            cur.execute("UPDATE ReportSchedule SET Active=0 WHERE Id=?", id)
+            cur.execute("DELETE FROM ReportSchedule WHERE Id = ?", id)
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Задание не найдено")
             conn.commit()
-            return {"ok": True}
+            return {"ok": True, "deleted": id}
+    except HTTPException:
+        raise
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 

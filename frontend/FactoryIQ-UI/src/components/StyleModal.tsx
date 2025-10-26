@@ -77,11 +77,16 @@ const STYLES = [
  *  Дефолты стилей (chart/table/excel)
  *  ================================ */
 const DEFAULT_CHART = {
+  /** тип визуализации */
+  type: "bar" as "bar" | "line",
+
   dpi: 140,
   size: { w: 1280, h: 600 },
+
   fontFamily: "",
   fontWeight: 400 as 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900,
   fontStyle: "normal" as "normal" | "italic" | "oblique",
+
   layout: {
     title: { show: true, align: "center" as const, fontSize: 18, upper: true },
     legend: { show: true, position: "bottom" as const },
@@ -90,7 +95,25 @@ const DEFAULT_CHART = {
     x: { rotation: 30, tickFont: 10, wrap: 13, grid: false },
     y: { tickFont: 10, grid: true, label: "Всего, тонн" },
   },
-  bars: { width: 0.9, rounded: true, showValueInside: true, valuePrecision: 1 },
+
+  /** настройки столбцов (видны только при type='bar') */
+  bars: {
+    width: 0.9,
+    gap: 0.1,
+    rounded: true,
+    showValueInside: true,
+    valuePrecision: 1,
+  },
+
+  /** настройки линии (видны только при type='line') */
+  line: {
+    width: 2,
+    smooth: false,
+    showPoints: true,
+    pointRadius: 3,
+    valuePrecision: 1,
+  },
+
   palette: {
     type: "single-or-multi" as const,
     singleColor: "#2176C1",
@@ -154,9 +177,6 @@ const DEFAULT_EXCEL = {
 /** ================================
  *  Утилиты
  *  ================================ */
-
-/** ColorPicker иногда отдаёт объект.
- *  Приводим к HEX-строке или дефолту. */
 const toColorString = (v: any, def?: string): string | undefined => {
   if (!v && def) return def;
   if (!v) return undefined;
@@ -176,7 +196,6 @@ const toColorString = (v: any, def?: string): string | undefined => {
   return def ?? undefined;
 };
 
-/** Глубокий merge без учёта массивов */
 const deepMerge = (dst: any, src: any) => {
   if (!src) return dst;
   Object.keys(src).forEach((k) => {
@@ -198,7 +217,6 @@ const deepMerge = (dst: any, src: any) => {
   return dst;
 };
 
-/** Безопасный structuredClone (node 16/старые браузеры) */
 const clone = <T,>(obj: T): T => {
   if (typeof (globalThis as any).structuredClone === "function") {
     return (globalThis as any).structuredClone(obj);
@@ -206,15 +224,24 @@ const clone = <T,>(obj: T): T => {
   return JSON.parse(JSON.stringify(obj));
 };
 
-/** Санитайзеры: подставляют дефолты + нормализуют цвета/типы */
+/** Санитайзеры */
 const sanitizeChart = (input: any) => {
   const c = deepMerge(clone(DEFAULT_CHART), input || {});
+  c.type =
+    c.type === "line" || c.type === "bar" ? (c.type as "line" | "bar") : "bar";
+
+  // страховки по блокам
+  if (!c.bars) c.bars = clone(DEFAULT_CHART.bars);
+  if (!c.line) c.line = clone(DEFAULT_CHART.line);
+
   c.palette.singleColor = toColorString(c.palette.singleColor, "#2176C1");
   c.background.color = toColorString(c.background.color, "#FFFFFF");
+
   if (!Array.isArray(c.palette.multi)) c.palette.multi = [];
   c.palette.multi = c.palette.multi
     .map((x: any) => toColorString(x))
     .filter(Boolean);
+
   c.dpi = Number(c.dpi ?? 140);
   c.size = { w: Number(c.size?.w ?? 1280), h: Number(c.size?.h ?? 600) };
   return c;
@@ -233,13 +260,9 @@ const sanitizeTable = (input: any) => {
 const sanitizeExcel = (input: any) =>
   deepMerge(clone(DEFAULT_EXCEL), input || {});
 
-/** Ответ /styles/:id может быть в разных форматах.
- *  Приводим к { chart, table, excel } (объекты). */
+/** Ответ /styles/:id может быть в разных форматах */
 function normalizeStyleResponse(sjson: any) {
-  // иногда сервер может вернуть { ok:true, style:{...} } или просто {...}
   const src = sjson?.style ?? sjson ?? {};
-
-  // имя стиля, если сервер его возвращает
   const styleName = src?.Name || src?.name || sjson?.Name || sjson?.name || "";
 
   const read = (obj: any, lowKey: string, capKey: string) => {
@@ -252,7 +275,7 @@ function normalizeStyleResponse(sjson: any) {
         return undefined;
       }
     }
-    return v; // уже объект
+    return v;
   };
 
   const chart = read(src, "chart", "ChartStyle") ?? {};
@@ -274,12 +297,11 @@ const StyleModal: React.FC<Props> = ({
 }) => {
   const [form] = Form.useForm();
 
-  // то, что уходит в предпросмотр и сохранение
+  // состояние, которое уходит в предпросмотр и сохранение
   const [styleOverride, setStyleOverride] = React.useState<any>({
     chart: DEFAULT_CHART,
     table: DEFAULT_TABLE,
     excel: DEFAULT_EXCEL,
-    // фронтовый таб "Текст" — на будущее
     text: {
       fontFamily: "",
       fontWeight: 400,
@@ -289,13 +311,15 @@ const StyleModal: React.FC<Props> = ({
     },
   });
 
-  /** Загружаем стиль по templateId → style_id → /styles/:id */
+  /** Текущий тип графика для адаптивных секций */
+  const chartType = Form.useWatch(["chart", "type"], form) || "bar";
+
+  /** Загрузка стиля из шаблона */
   React.useEffect(() => {
     if (!open || !templateId) return;
 
     (async () => {
       try {
-        // 1) узнаём у шаблона его style_id
         const t = await fetch(
           `http://localhost:8000/reports/templates/${templateId}`
         );
@@ -309,7 +333,6 @@ const StyleModal: React.FC<Props> = ({
         if (t.ok && tjson?.ok && tjson?.template?.style_id) {
           const sid = tjson.template.style_id;
 
-          // 2) грузим сам стиль
           const s = await fetch(`http://localhost:8000/styles/${sid}`);
           const sjson = await s.json();
 
@@ -320,21 +343,18 @@ const StyleModal: React.FC<Props> = ({
             excel = sanitizeExcel(norm.excel);
             styleName = norm.styleName || "";
           } else {
-            // нет стиля — подставляем дефолты
             chart = sanitizeChart({});
             table = sanitizeTable({});
             excel = sanitizeExcel({});
             styleName = "";
           }
         } else {
-          // у шаблона нет style_id — дефолты
           chart = sanitizeChart({});
           table = sanitizeTable({});
           excel = sanitizeExcel({});
           styleName = "";
         }
 
-        // 3) заполняем форму и локальный стейт
         form.setFieldsValue({
           chart: {
             ...chart,
@@ -347,13 +367,12 @@ const StyleModal: React.FC<Props> = ({
           },
           table: { ...table },
           excel: { ...excel },
-          text: styleOverride.text, // фронтовый таб
-          __styleName: styleName, // ← подставляем имя сохранённого стиля
+          text: styleOverride.text,
+          __styleName: styleName,
         });
 
         setStyleOverride({ chart, table, excel, text: styleOverride.text });
       } catch {
-        // фоллбек на дефолты, если что-то пошло не так
         const chart = sanitizeChart({});
         const table = sanitizeTable({});
         const excel = sanitizeExcel({});
@@ -378,7 +397,7 @@ const StyleModal: React.FC<Props> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, templateId]);
 
-  /** Любое изменение формы → собираем чистый override (цвета → HEX строки) */
+  /** Любое изменение формы → чистим цвета и кладём в state */
   const handleValuesChange = (_: any, all: any) => {
     const safe = JSON.parse(JSON.stringify(all || {}));
 
@@ -425,7 +444,7 @@ const StyleModal: React.FC<Props> = ({
     setIfExists(safe, ["table", "body", "borderColor"], toHex);
     setIfExists(safe, ["table", "body", "color"], toHex);
 
-    // фронтовый таб «Текст»
+    // text → цвет
     setIfExists(safe, ["text", "color"], toHex);
 
     setStyleOverride(safe);
@@ -440,18 +459,14 @@ const StyleModal: React.FC<Props> = ({
     try {
       const values = form.getFieldsValue(true);
       const payload = JSON.parse(JSON.stringify(styleOverride));
-
       const name =
         values?.__styleName?.trim() ||
         `Стиль от ${new Date().toLocaleDateString()}`;
 
-      // безопасно приводим к строкам
       const ChartStyle = JSON.stringify(payload.chart ?? {});
       const TableStyle = JSON.stringify(payload.table ?? {});
       const ExcelStyle = JSON.stringify(payload.excel ?? {});
 
-      // 1) создаём стиль: отправляем и верхний, и нижний регистр
-      // (сервер возьмёт то, что ему нужно)
       const resp = await fetch("http://localhost:8000/styles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -459,12 +474,12 @@ const StyleModal: React.FC<Props> = ({
           name,
           is_default: false,
 
-          // для вашего текущего бэка, где колонки называются так:
+          // текущее API
           ChartStyle,
           TableStyle,
           ExcelStyle,
 
-          // на будущее/совместимость:
+          // и на будущее
           chart: payload.chart,
           table: payload.table,
           excel: payload.excel,
@@ -472,10 +487,9 @@ const StyleModal: React.FC<Props> = ({
       });
       if (!resp.ok)
         throw new Error((await resp.text()) || "Не удалось сохранить стиль");
-      const data = await resp.json(); // ожидаем { ok: true, id: number }
+      const data = await resp.json();
       const styleId = data.id;
 
-      // 2) привязка к шаблону
       const bind = await fetch(
         `http://localhost:8000/reports/templates/${templateId}/style`,
         {
@@ -496,15 +510,15 @@ const StyleModal: React.FC<Props> = ({
     }
   };
 
-  /** Показываем только нужные вкладки по текущему типу предпросмотра */
+  /** Показываем только нужные вкладки по текущему предпросмотру */
   const visibleKeys =
     preview.format === "chart"
       ? ["chart"]
       : preview.format === "table"
-      ? ["table"]
-      : preview.format === "text"
-      ? ["text"]
-      : ["chart", "table", "excel"];
+        ? ["table"]
+        : preview.format === "text"
+          ? ["text"]
+          : ["chart", "table", "excel"];
 
   /** Вкладки формы */
   const tabs = [
@@ -513,6 +527,16 @@ const StyleModal: React.FC<Props> = ({
       label: "График",
       children: (
         <>
+          <Divider>Тип графика</Divider>
+          <Form.Item label="Тип" name={["chart", "type"]}>
+            <Select
+              options={[
+                { value: "bar", label: "Столбцы" },
+                { value: "line", label: "Линия" },
+              ]}
+            />
+          </Form.Item>
+
           <Divider>Шрифт</Divider>
           <Form.Item label="Семейство" name={["chart", "fontFamily"]}>
             <Select
@@ -623,43 +647,82 @@ const StyleModal: React.FC<Props> = ({
           >
             <Switch />
           </Form.Item>
-          <Form.Item
-            label="Подпись оси Y"
-            name={["chart", "axes", "y", "label"]}
-          >
+          <Form.Item label="Подпись оси Y" name={["chart", "axes", "y", "label"]}>
             <Input />
           </Form.Item>
 
-          <Divider>Столбцы</Divider>
-          <Form.Item label="Ширина столбца" name={["chart", "bars", "width"]}>
-            <Slider min={0.2} max={1.5} step={0.05} />
-          </Form.Item>
-          <Form.Item
-            label="Зазор между столбцами (в долях категории)"
-            name={["chart", "bars", "gap"]}
-          >
-            <Slider min={0} max={0.5} step={0.02} />
-          </Form.Item>
-          <Form.Item
-            label="Скруглять углы"
-            name={["chart", "bars", "rounded"]}
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            label="Показывать значения внутри"
-            name={["chart", "bars", "showValueInside"]}
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            label="Точность значения"
-            name={["chart", "bars", "valuePrecision"]}
-          >
-            <InputNumber min={0} max={3} />
-          </Form.Item>
+          {chartType === "bar" && (
+            <>
+              <Divider>Столбцы</Divider>
+              <Form.Item
+                label="Ширина столбца"
+                name={["chart", "bars", "width"]}
+              >
+                <Slider min={0.2} max={1.5} step={0.05} />
+              </Form.Item>
+              <Form.Item
+                label="Зазор между столбцами (в долях категории)"
+                name={["chart", "bars", "gap"]}
+              >
+                <Slider min={0} max={0.5} step={0.02} />
+              </Form.Item>
+              <Form.Item
+                label="Скруглять углы"
+                name={["chart", "bars", "rounded"]}
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                label="Показывать значения внутри"
+                name={["chart", "bars", "showValueInside"]}
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                label="Точность значения"
+                name={["chart", "bars", "valuePrecision"]}
+              >
+                <InputNumber min={0} max={3} />
+              </Form.Item>
+            </>
+          )}
+
+          {chartType === "line" && (
+            <>
+              <Divider>Линия</Divider>
+              <Form.Item label="Толщина линии (px)" name={["chart", "line", "width"]}>
+                <Slider min={1} max={8} />
+              </Form.Item>
+              <Form.Item
+                label="Сглаживание линии"
+                name={["chart", "line", "smooth"]}
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                label="Показывать точки"
+                name={["chart", "line", "showPoints"]}
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                label="Радиус точки (px)"
+                name={["chart", "line", "pointRadius"]}
+              >
+                <Slider min={1} max={10} />
+              </Form.Item>
+              <Form.Item
+                label="Точность значения"
+                name={["chart", "line", "valuePrecision"]}
+              >
+                <InputNumber min={0} max={3} />
+              </Form.Item>
+            </>
+          )}
 
           <Divider>Палитра</Divider>
           <Form.Item label="Режим" name={["chart", "palette", "type"]}>
@@ -777,10 +840,7 @@ const StyleModal: React.FC<Props> = ({
           <Form.Item label="Фон шапки" name={["table", "header", "bg"]}>
             <ColorPicker format="hex" />
           </Form.Item>
-          <Form.Item
-            label="Цвет текста шапки"
-            name={["table", "header", "color"]}
-          >
+          <Form.Item label="Цвет текста шапки" name={["table", "header", "color"]}>
             <ColorPicker format="hex" />
           </Form.Item>
           <Space.Compact style={{ width: "100%" }}>
@@ -800,10 +860,7 @@ const StyleModal: React.FC<Props> = ({
               <Switch />
             </Form.Item>
           </Space.Compact>
-          <Form.Item
-            label="Выравнивание шапки"
-            name={["table", "header", "align"]}
-          >
+          <Form.Item label="Выравнивание шапки" name={["table", "header", "align"]}>
             <Select
               options={[
                 { value: "left", label: "Слева" },
@@ -817,10 +874,7 @@ const StyleModal: React.FC<Props> = ({
           <Form.Item label="Цвет текста" name={["table", "body", "color"]}>
             <ColorPicker format="hex" />
           </Form.Item>
-          <Form.Item
-            label="Выравнивание текста"
-            name={["table", "body", "align"]}
-          >
+          <Form.Item label="Выравнивание текста" name={["table", "body", "align"]}>
             <Select
               options={[
                 { value: "left", label: "Слева" },
@@ -849,10 +903,7 @@ const StyleModal: React.FC<Props> = ({
           <Form.Item label="Цвет зебры" name={["table", "body", "zebraColor"]}>
             <ColorPicker format="hex" />
           </Form.Item>
-          <Form.Item
-            label="Цвет границ"
-            name={["table", "body", "borderColor"]}
-          >
+          <Form.Item label="Цвет границ" name={["table", "body", "borderColor"]}>
             <ColorPicker format="hex" />
           </Form.Item>
 
@@ -920,10 +971,7 @@ const StyleModal: React.FC<Props> = ({
           >
             <Switch />
           </Form.Item>
-          <Form.Item
-            label="Подпись в итогах"
-            name={["table", "totals", "label"]}
-          >
+          <Form.Item label="Подпись в итогах" name={["table", "totals", "label"]}>
             <Input placeholder="Итого" />
           </Form.Item>
         </>
@@ -965,10 +1013,7 @@ const StyleModal: React.FC<Props> = ({
       label: "Текст",
       children: (
         <>
-          <Form.Item
-            label="Семейство шрифта (текст)"
-            name={["text", "fontFamily"]}
-          >
+          <Form.Item label="Семейство шрифта (текст)" name={["text", "fontFamily"]}>
             <Select
               options={FONT_FAMILIES}
               showSearch
@@ -1028,10 +1073,7 @@ const StyleModal: React.FC<Props> = ({
               <Input placeholder="Например: Corporate Light" />
             </Form.Item>
 
-            <Tabs
-              defaultActiveKey={visibleKeys[0] ?? "chart"}
-              items={tabs as any}
-            />
+            <Tabs defaultActiveKey={visibleKeys[0] ?? "chart"} items={tabs as any} />
 
             <div className={styles.formActions}>
               <Button type="primary" onClick={handleSaveStyle}>

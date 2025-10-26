@@ -24,7 +24,7 @@ param(
   # Python venv exe
   [string]$VenvPython = 'C:\inetpub\FactoryIQ\backend\venv\Scripts\python.exe',
 
-  # API entry / workers (your structure is backend\app\...)
+  # API entry / workers
   [string]$ApiModule  = 'app.main:app',
   [string]$OpcModule  = 'app.polling_worker',
   [string]$RptModule  = 'app.report_worker',
@@ -43,12 +43,11 @@ function Info ($m){ Write-Host $m -ForegroundColor Cyan }
 function Warn ($m){ Write-Host $m -ForegroundColor Yellow }
 function Fail ($m){ Write-Host $m -ForegroundColor Red; exit 1 }
 
-# Helper: get command path if exists
 function Get-CmdPath([string]$name){
   try { (Get-Command $name -ErrorAction Stop).Source } catch { $null }
 }
 
-# 1) Install IIS features
+# ---------- 1) Install IIS features ----------
 function Do-InstallIIS {
   Info 'Installing IIS features...'
   Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole -All -NoRestart | Out-Null
@@ -63,10 +62,10 @@ function Do-InstallIIS {
   Enable-WindowsOptionalFeature -Online -FeatureName IIS-LoggingLibraries -All -NoRestart | Out-Null
   Enable-WindowsOptionalFeature -Online -FeatureName IIS-HttpTracing -All -NoRestart | Out-Null
   Ok 'IIS features enabled.'
-  Warn 'Note: URL Rewrite and ARR must be installed via MSI separately.'
+  Warn 'Note: install URL Rewrite + ARR via MSI separately.'
 }
 
-# 2) Tools (NSSM, Node)
+# ---------- 2) Tools (NSSM, Node) ----------
 function Do-InstallTools {
   $nssm = Get-CmdPath 'nssm'
   if ($nssm) { Ok ("NSSM found: {0}" -f $nssm) }
@@ -78,13 +77,13 @@ function Do-InstallTools {
       $nssm = Get-CmdPath 'nssm'
       if ($nssm) { Ok ("NSSM installed: {0}" -f $nssm) } else { Warn 'NSSM not found after choco. Install manually and re-run.' }
     } else {
-      Warn 'Chocolatey not found. Install nssm manually (put nssm.exe into PATH) and re-run.'
+      Warn 'Chocolatey not found. Install NSSM manually (put nssm.exe into PATH) and re-run.'
     }
   }
   try { $nodev = node -v; Ok ("Node.js: {0}" -f $nodev) } catch { Warn 'Node.js not found. Install Node LTS for frontend build.' }
 }
 
-# Ensure app pool
+# ---------- helpers ----------
 function Ensure-Pool([string]$name){
   $poolPath = ("IIS:\AppPools\{0}" -f $name)
   if (-not (Test-Path $poolPath)) { New-WebAppPool -Name $name | Out-Null; Ok ("AppPool created: {0}" -f $name) }
@@ -93,14 +92,87 @@ function Ensure-Pool([string]$name){
   Set-ItemProperty $poolPath -Name processModel.loadUserProfile -Value $true
 }
 
-# 3) Configure IIS (site + /api + web.config)
+# ---------- SPA web.config writer (single source of truth) ----------
+function Write-SpaWebConfig {
+  param([string]$DestDir)
+
+  if (-not (Test-Path -Path $DestDir)) {
+    New-Item -ItemType Directory -Path $DestDir | Out-Null
+  }
+
+  $wcPath = Join-Path $DestDir 'web.config'
+  $content = @'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <staticContent>
+      <remove fileExtension=".json" />
+      <remove fileExtension=".webp" />
+      <remove fileExtension=".woff2" />
+      <remove fileExtension=".svg" />
+      <mimeMap fileExtension=".json"  mimeType="application/json" />
+      <mimeMap fileExtension=".webp"  mimeType="image/webp" />
+      <mimeMap fileExtension=".woff2" mimeType="font/woff2" />
+      <mimeMap fileExtension=".svg"   mimeType="image/svg+xml" />
+    </staticContent>
+    <rewrite>
+      <rules>
+        <!-- do not rewrite API -->
+        <rule name="Pass API" stopProcessing="true">
+          <match url="^api(/.*)?$" />
+          <action type="None" />
+        </rule>
+
+        <!-- pass through real files/folders and common assets -->
+        <rule name="Skip static files and folders" stopProcessing="true">
+          <match url=".*" />
+          <conditions logicalGrouping="MatchAny">
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" />
+            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" />
+            <add input="{REQUEST_URI}" pattern="\.(css|js|map|json|png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot)$" />
+            <add input="{REQUEST_URI}" pattern="^/(favicon\.ico|robots\.txt|health\.txt)$" />
+          </conditions>
+          <action type="None" />
+        </rule>
+
+        <!-- SPA fallback -->
+        <rule name="SPA Fallback to index.html" stopProcessing="true">
+          <match url=".*" />
+          <action type="Rewrite" url="/index.html" />
+        </rule>
+      </rules>
+    </rewrite>
+
+    <defaultDocument>
+      <files>
+        <clear />
+        <add value="index.html" />
+      </files>
+    </defaultDocument>
+
+    <caching>
+      <profiles>
+        <add extension=".js" policy="CacheForTimePeriod" duration="7.00:00:00" kernelCachePolicy="DontCache" />
+        <add extension=".css" policy="CacheForTimePeriod" duration="7.00:00:00" kernelCachePolicy="DontCache" />
+        <add extension=".woff2" policy="CacheForTimePeriod" duration="30.00:00:00" kernelCachePolicy="DontCache" />
+      </profiles>
+    </caching>
+  </system.webServer>
+</configuration>
+'@
+
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($wcPath, $content, $utf8NoBom)
+}
+
+# ---------- 3) Configure IIS (site + /api + web.config) ----------
 function Do-SetupIIS {
   $APPCMD = "$env:windir\system32\inetsrv\appcmd.exe"
   if (-not (Test-Path $APPCMD)) { Fail 'appcmd.exe not found. Install IIS first.' }
 
   New-Item -ItemType Directory -Force -Path $ProdRoot,$FrontProd,$BackProd | Out-Null
 
-  # hosts
+  # hosts record
   $hosts = "$env:windir\System32\drivers\etc\hosts"
   $line  = ("127.0.0.1`t{0}" -f $HostName)
   $hostsText = (Get-Content $hosts -ErrorAction SilentlyContinue) -join "`n"
@@ -122,9 +194,10 @@ function Do-SetupIIS {
   Ensure-Pool $WebPool
   Ensure-Pool $ApiPool
   Set-ItemProperty ("IIS:\Sites\{0}" -f $SiteName) -Name applicationPool -Value $WebPool
-  # ACL для IIS_IUSRS
-& icacls $FrontProd /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q | Out-Null
-& icacls $BackProd  /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q | Out-Null
+
+  # ACL for IIS_IUSRS
+  & icacls $FrontProd /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q | Out-Null
+  & icacls $BackProd  /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q | Out-Null
   Ok 'ACL for IIS_IUSRS set on frontend/backend.'
 
   # /api app
@@ -139,49 +212,12 @@ function Do-SetupIIS {
     Info 'IIS application /api updated.'
   }
 
-   # front web.config
-  $frontCfg = Join-Path $FrontProd 'web.config'
-@"
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <system.webServer>
+  # ensure SPA web.config for frontend
+  Write-SpaWebConfig -DestDir $FrontProd
+  Ok 'Frontend web.config ensured (SPA fallback).'
 
-    <rewrite>
-      <rules>
-        <!-- НЕ трогаем статику -->
-        <rule name="IgnoreStatic" stopProcessing="true">
-          <match url="^(assets/|.*\.(css|js|png|jpg|jpeg|gif|svg|webp|ico|txt|json|map))$" ignoreCase="true" />
-          <action type="None" />
-        </rule>
-
-        <!-- SPA fallback (кроме /api) -->
-        <rule name="SPA_Fallback" stopProcessing="true">
-          <match url=".*" />
-          <conditions logicalGrouping="MatchAll">
-            <add input="{REQUEST_URI}" pattern="^/api($|/)" negate="true" />
-            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
-            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
-          </conditions>
-          <action type="Rewrite" url="/index.html" />
-        </rule>
-      </rules>
-    </rewrite>
-
-    <defaultDocument>
-      <files>
-        <clear />
-        <add value="index.html" />
-      </files>
-    </defaultDocument>
-
-  </system.webServer>
-</configuration>
-
-"@ | Out-File -FilePath $frontCfg -Encoding ascii -Force
-  Ok 'Frontend web.config written.'
-
- # back web.config (reverse proxy -> 127.0.0.1:$UvicornPort)
-$backCfg = Join-Path $BackProd 'web.config'
+  # backend reverse proxy web.config (to 127.0.0.1:$UvicornPort)
+  $backCfg = Join-Path $BackProd 'web.config'
 @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -199,7 +235,6 @@ $backCfg = Join-Path $BackProd 'web.config'
         </rule>
       </rules>
       <outboundRules>
-        <!-- Исправлять абсолютные http://127.0.0.1:$UvicornPort/... в ответах -->
         <rule name="ReverseProxyOutboundRule1" preCondition="ResponseIsHtml1">
           <match filterByTags="A, Form, Img, Link, Script" pattern="http://127.0.0.1:$UvicornPort/(.*)" />
           <action type="Rewrite" value="/{R:1}" />
@@ -218,32 +253,80 @@ $backCfg = Join-Path $BackProd 'web.config'
   </system.webServer>
 </configuration>
 "@ | Out-File -FilePath $backCfg -Encoding ascii -Force
-Ok 'Backend web.config written.'
+  Ok 'Backend web.config written.'
 
-
-
-  # ARR proxy (if installed)
+  # ARR proxy on
   try {
     & "$env:windir\system32\inetsrv\appcmd.exe" set config -section:system.webServer/proxy /enabled:"True" /preserveHostHeader:"True" /reverseRewriteHostInResponseHeaders:"True" /commit:apphost | Out-Null
     Ok 'ARR proxy enabled.'
   } catch { Warn 'Could not set proxy section (install URL Rewrite and ARR).' }
 }
 
-# 4) Build & deploy frontend
-function Do-BuildFrontend {
-  if (-not (Test-Path (Join-Path $FrontDev 'package.json'))) { Warn ("package.json not found at {0}" -f $FrontDev); return }
-  Push-Location $FrontDev
+# ---------- 4) Build & deploy frontend ----------
+function Invoke-Step4-FrontendBuildAndDeploy {
+  param(
+    [string]$DevClient   = $FrontDev,
+    [string]$ProdWebRoot = $FrontProd
+  )
+
+  Write-Host "=== STEP 4: Frontend build & deploy ===" -ForegroundColor Green
+  Write-Host ("DEV_CLIENT: {0}" -f $DevClient)
+  Write-Host ("PROD_WEBROOT: {0}" -f $ProdWebRoot)
+
+  if (-not (Test-Path -Path $DevClient)) { throw ("Frontend folder not found: {0}" -f $DevClient) }
+  Push-Location $DevClient
   try {
-    node -v | Out-Null; npm -v | Out-Null
-    if (Test-Path (Join-Path $FrontDev 'package-lock.json')) { npm ci } else { npm install }
+    # 1) Check node/npm
+    $nodeVer = (node -v) 2>$null
+    $npmVer  = (npm -v) 2>$null
+    if (-not $nodeVer -or -not $npmVer) { throw "Node.js / npm not found in PATH" }
+    Write-Host ("node: {0}, npm: {1}" -f $nodeVer, $npmVer)
+
+    # 2) Install deps
+    if (Test-Path "$DevClient\package-lock.json") { npm ci } else { npm install }
+
+    # 3) Build
     npm run build
-  } finally { Pop-Location }
-  New-Item -ItemType Directory -Force -Path $FrontProd | Out-Null
-  robocopy (Join-Path $FrontDev 'dist') $FrontProd /MIR /R:2 /W:1 | Out-Null
-  Ok ("Frontend built and copied to {0}" -f $FrontProd)
+    $dist = Join-Path $DevClient "dist"
+    if (-not (Test-Path (Join-Path $dist "index.html"))) {
+      throw ("Build not found: {0}" -f (Join-Path $dist "index.html"))
+    }
+
+    # 4) Ensure PROD dir
+    if (-not (Test-Path $ProdWebRoot)) { New-Item -ItemType Directory -Path $ProdWebRoot | Out-Null }
+
+    # 5) Backup current frontend
+    $ts = Get-Date -Format "yyyyMMdd_HHmmss"
+    $backupDir = Join-Path (Split-Path $ProdWebRoot -Parent) ("front_backup_" + $ts)
+    New-Item -ItemType Directory -Path $backupDir | Out-Null
+    robocopy $ProdWebRoot $backupDir /E /XD backend /XF web.config 1>$null 2>$null | Out-Null
+    Write-Host ("Backup created: {0}" -f $backupDir)
+
+    # 6) Copy new build
+    robocopy $dist $ProdWebRoot /MIR /XD backend /XF web.config /R:2 /W:2
+
+    # 7) Ensure SPA web.config
+    Write-SpaWebConfig -DestDir $ProdWebRoot
+
+    # 8) Health marker
+    if (-not (Test-Path (Join-Path $ProdWebRoot "health.txt"))) {
+      Set-Content -Path (Join-Path $ProdWebRoot "health.txt") -Value "OK" -Encoding ascii
+    }
+
+    # 9) Quick validation
+    foreach ($f in @("index.html","web.config","assets")) {
+      $p = Join-Path $ProdWebRoot $f
+      if (-not (Test-Path $p)) { Write-Warning ("Expected path missing: {0}" -f $p) }
+    }
+
+    Write-Host "OK: frontend deployed and SPA routing configured" -ForegroundColor Green
+  }
+  finally {
+    Pop-Location
+  }
 }
 
-# 5) Deploy backend (copy + venv + requirements)
+# ---------- 5) Deploy backend ----------
 function Do-DeployBackend {
   if (-not (Test-Path $BackDev)) { Warn ("Backend sources not found: {0}" -f $BackDev); return }
   New-Item -ItemType Directory -Force -Path $BackProd | Out-Null
@@ -260,13 +343,12 @@ function Do-DeployBackend {
   if (Test-Path $req) { & $VenvPython -m pip install -r $req }
   else { & $VenvPython -m pip install -U fastapi "uvicorn[standard]" }
 
-  # ensure package markers
   New-Item -ItemType File -Force -Path (Join-Path $BackProd 'app\__init__.py') | Out-Null
   New-Item -ItemType File -Force -Path (Join-Path $BackProd 'app\routers\__init__.py') | Out-Null
   Ok ("Backend deployed to {0}" -f $BackProd)
 }
 
-# 6) HTTPS (self-signed + bind SNI + http.sys)
+# ---------- 6) HTTPS (self-signed + bind SNI + http.sys) ----------
 function Do-HTTPS {
   $APPCMD = "$env:windir\system32\inetsrv\appcmd.exe"
   $cert = New-SelfSignedCertificate -DnsName $HostName -CertStoreLocation 'Cert:\LocalMachine\My' -FriendlyName ("{0} self-signed" -f $HostName) -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(5)
@@ -287,8 +369,7 @@ function Do-HTTPS {
   Ok ("HTTPS ready for https://{0}:{1} (thumb={2})" -f $HostName,$HttpsPort,$thumb)
 }
 
-# 7) Register Windows Services (NSSM)
-
+# ---------- 7) Register Windows Services (NSSM) ----------
 function Do-Services {
   function Remove-Service-Force([string]$Name){
     try { sc.exe stop $Name | Out-Null } catch {}
@@ -307,9 +388,9 @@ function Do-Services {
   $logs = Join-Path $BackProd 'logs'
   New-Item -ItemType Directory -Force -Path $logs | Out-Null
 
-  $FERNET = 'Z3Vls19NlJWSwECAQF7vxEBStOvACn97aPS9fjPileQ='  # TODO: подставь свой при необходимости
+  $FERNET = 'REPLACE_ME_WITH_REAL_FERNET_KEY'  # TODO set your key
 
-  # API (оставляем через uvicorn.exe)
+  # API via uvicorn.exe
   $uviex = Join-Path (Split-Path $VenvPython -Parent) 'uvicorn.exe'
   if (-not (Test-Path $uviex)) {
     & $VenvPython -m pip install -U "uvicorn[standard]" | Out-Null
@@ -325,15 +406,13 @@ function Do-Services {
   & nssm set $SvcApi AppRotateBytes 10485760 | Out-Null
   & nssm set $SvcApi AppEnvironmentExtra ("PYTHONUNBUFFERED=1","PYTHONPATH=$BackProd") | Out-Null
   & nssm set $SvcApi Start SERVICE_AUTO_START | Out-Null
-    # Firewall для локального UVicorn
   try {
     New-NetFirewallRule -DisplayName "FactoryIQ Uvicorn $UvicornPort" -Direction Inbound -LocalPort $UvicornPort -Protocol TCP -Action Allow -Profile Any | Out-Null
   } catch {}
-
   & nssm start $SvcApi | Out-Null
   Ok 'Service ready: factoryiq-api'
 
-  # OPC: python app\polling_worker.py
+  # OPC
   Remove-Service-Force -Name $SvcOpc
   & nssm install $SvcOpc $VenvPython 'app\polling_worker.py' | Out-Null
   & nssm set $SvcOpc AppDirectory $BackProd | Out-Null
@@ -347,7 +426,7 @@ function Do-Services {
   & nssm start $SvcOpc | Out-Null
   Ok 'Service ready: factoryiq-opc'
 
-  # REPORTS: python app\report_worker.py
+  # REPORTS
   Remove-Service-Force -Name $SvcRpt
   & nssm install $SvcRpt $VenvPython 'app\report_worker.py' | Out-Null
   & nssm set $SvcRpt AppDirectory $BackProd | Out-Null
@@ -364,9 +443,7 @@ function Do-Services {
   Get-Service $SvcApi,$SvcOpc,$SvcRpt | Select Name,Status,StartType | Format-Table -AutoSize
 }
 
-
-
-# 8) Verify
+# ---------- 8) Verify ----------
 function Do-Verify {
   $APPCMD = "$env:windir\system32\inetsrv\appcmd.exe"
   Info 'IIS site bindings:'
@@ -377,8 +454,8 @@ function Do-Verify {
   try { & curl.exe ("http://127.0.0.1:{0}/" -f $UvicornPort) } catch { Warn 'curl.exe local check failed' }
   Info 'API via IIS HTTPS check:'
   try { & curl.exe -k ("https://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) } catch { Warn 'curl.exe https check failed' }
-
 }
+
 function Get-ProcByPort([int]$Port){
   (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
     Group-Object OwningProcess | ForEach-Object {
@@ -392,23 +469,24 @@ function Get-ProcByPort([int]$Port){
   })
 }
 
+# ---------- 9) Repair ----------
 function Do-Repair {
   Info '=== REPAIR: quick fixes for 500/API and white screen ==='
 
-  # 1) Перегенерируем web.config-ы (могли съехать)
+  # 1) Re-generate web.configs and IIS
   Do-SetupIIS
 
-  # 2) Проверим/перезапустим службы
+  # 2) Restart API service
   try { sc.exe stop  $SvcApi | Out-Null } catch {}
   Start-Sleep -Seconds 2
   try { sc.exe start $SvcApi | Out-Null } catch {}
   Start-Sleep -Seconds 2
 
-  # 3) Проверим порт UVicorn
+  # 3) Check uvicorn port
   $p = Get-ProcByPort -Port $UvicornPort
   if (-not $p) { Warn ("Nothing listens on {0}" -f $UvicornPort) } else { Ok ("Listening on {0}: PID={1} ({2})" -f $UvicornPort,$p.PID,$p.Process) }
 
-  # 4) Быстрые curl-пробы
+  # 4) Quick curls
   Info 'curl local API:'
   try { & curl.exe ("http://127.0.0.1:{0}/openapi.json" -f $UvicornPort) } catch { Warn 'Local curl failed' }
 
@@ -418,32 +496,31 @@ function Do-Repair {
   Info 'curl via IIS (HTTPS, -k):'
   try { & curl.exe -k ("https://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) } catch { Warn 'IIS HTTPS curl failed' }
 
-  # 5) Статика фронта
+  # 5) Front static
   Info 'curl index.html:'
   try { & curl.exe ("http://{0}/" -f $HostName) } catch { Warn 'Front curl failed' }
 
-  # 6) Если /api через IIS даёт 500 — покажем подсказки
+  # 6) If /api returns 5xx - show hints
   $r = try { (Invoke-WebRequest -UseBasicParsing ("http://{0}{1}/openapi.json" -f $HostName,$ApiAppPath) -Method Head -TimeoutSec 10).StatusCode } catch { $_.Exception.Message }
   if ($r -isnot [int] -or $r -ge 500) {
     Warn "IIS /api returns 5xx. Tips:"
-    Write-Host " - Проверьте, что сервис $SvcApi запущен:  sc query $SvcApi" -ForegroundColor Yellow
-    Write-Host " - Логи: $BackProd\logs\api.err.log и api.out.log" -ForegroundColor Yellow
-    Write-Host " - Проверить включён ли ARR и URL Rewrite (переставить MSI при необходимости)" -ForegroundColor Yellow
+    Write-Host " - Check service: sc query $SvcApi" -ForegroundColor Yellow
+    Write-Host " - Logs: $BackProd\logs\api.err.log and api.out.log" -ForegroundColor Yellow
+    Write-Host " - Ensure ARR + URL Rewrite installed" -ForegroundColor Yellow
   } else {
     Ok "IIS /api OK."
   }
-  # 7) Если локальный API или IIS /api падают — показать хвост логов UVicorn
-if ($r -isnot [int] -or $r -ge 500) {
-  $elog = Join-Path $BackProd 'logs\api.err.log'
-  $olog = Join-Path $BackProd 'logs\api.out.log'
-  if (Test-Path $elog) { Info "=== tail api.err.log ==="; Get-Content $elog -Tail 80 }
-  if (Test-Path $olog) { Info "=== tail api.out.log ==="; Get-Content $olog -Tail 40 }
+
+  # 7) Tail logs if failing
+  if ($r -isnot [int] -or $r -ge 500) {
+    $elog = Join-Path $BackProd 'logs\api.err.log'
+    $olog = Join-Path $BackProd 'logs\api.out.log'
+    if (Test-Path $elog) { Info "=== tail api.err.log ==="; Get-Content $elog -Tail 80 }
+    if (Test-Path $olog) { Info "=== tail api.out.log ==="; Get-Content $olog -Tail 40 }
+  }
 }
 
-  
-}
-
-
+# ---------- Menu ----------
 function Show-Menu {
   Write-Host ''
   Write-Host '===== FactoryIQ Setup =====' -ForegroundColor Magenta
@@ -451,7 +528,7 @@ function Show-Menu {
   Write-Host '[2] Install tools (NSSM)'
   Write-Host '[3] Configure IIS (site/app/web.config)'
   Write-Host '[4] Build and deploy FRONTEND'
-  Write-Host '[5] Deploy BACKEND (venv + requirements + web.config)'
+  Write-Host '[5] Deploy BACKEND (venv + requirements)'
   Write-Host '[6] HTTPS: issue self-signed cert and bind'
   Write-Host '[7] Register Windows Services (API / OPC / Reports)'
   Write-Host '[8] Verify (bindings, http.sys, curl)'
@@ -468,12 +545,12 @@ do {
       '1' { Do-InstallIIS }
       '2' { Do-InstallTools }
       '3' { Do-SetupIIS }
-      '4' { Do-BuildFrontend }
+      '4' { Invoke-Step4-FrontendBuildAndDeploy -DevClient $FrontDev -ProdWebRoot $FrontProd }
       '5' { Do-DeployBackend }
       '6' { Do-HTTPS }
       '7' { Do-Services }
       '8' { Do-Verify }
-	  '9' { Do-Repair }
+      '9' { Do-Repair }
       '0' { break }
       default { Write-Host 'Unknown choice' -ForegroundColor Yellow }
     }

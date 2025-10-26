@@ -22,7 +22,7 @@ const StartPage: React.FC = () => {
           <div className={styles.logoBlock}>
             <img src={logo} alt="AltaiMai" className={styles.logo} />
             <h1 className="h-title" style={{ textAlign: "center" }}>
-              AltaiMai FactoryIQ
+              AltaiMai FabrIQ
             </h1>
           </div>
 

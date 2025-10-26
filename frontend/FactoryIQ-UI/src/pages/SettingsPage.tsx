@@ -333,9 +333,9 @@ const SettingsPage: React.FC = () => {
         <div className={styles.card}>
           <BackButton />
           <div className={styles.logoWrap}>
-            <img src={logo} alt="FactoryIQ" className={styles.logo} />
+            <img src={logo} alt="FabrIQ" className={styles.logo} />
           </div>
-          <h1 className={styles.title}>FactoryIQ — Настройки</h1>
+          <h1 className={styles.title}>FabrIQ — Настройки</h1>
           <div className={styles.subtitle}>Проверка и начальная конфигурация системы</div>
 
           {/* Сводная панель */}

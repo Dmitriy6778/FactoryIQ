@@ -233,13 +233,13 @@ const EditableCell: React.FC<EditableCellProps> = ({
           rules={
             inputType === "time"
               ? [
-                  {
-                    validator: (_, v) =>
-                      isValidTimeStr(v)
-                        ? Promise.resolve()
-                        : Promise.reject(new Error("Формат HH:mm:ss")),
-                  },
-                ]
+                {
+                  validator: (_, v) =>
+                    isValidTimeStr(v)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error("Формат HH:mm:ss")),
+                },
+              ]
               : undefined
           }
         >
@@ -676,17 +676,17 @@ const SchedulePage: React.FC = () => {
         !col.editable
           ? col
           : {
-              ...col,
-              onCell: (record: Task) => ({
-                record,
-                editable: col.editable,
-                dataIndex: col.dataIndex,
-                title: col.title,
-                inputType: col.inputType,
-                options: col.options,
-                handleSave,
-              }),
-            }
+            ...col,
+            onCell: (record: Task) => ({
+              record,
+              editable: col.editable,
+              dataIndex: col.dataIndex,
+              title: col.title,
+              inputType: col.inputType,
+              options: col.options,
+              handleSave,
+            }),
+          }
       ),
     [columns, handleSave]
   );
@@ -874,10 +874,10 @@ const SchedulePage: React.FC = () => {
               {...(sendFormat === "chart"
                 ? { allowClear: true, maxTagCount: 1 as const }
                 : {
-                    allowClear: true,
-                    maxTagCount: 4 as const,
-                    mode: "multiple" as const,
-                  })}
+                  allowClear: true,
+                  maxTagCount: 4 as const,
+                  mode: "multiple" as const,
+                })}
               value={aggregationType}
               onChange={(val) => {
                 const arr = Array.isArray(val) ? val : [val];
