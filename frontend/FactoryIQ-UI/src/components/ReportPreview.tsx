@@ -3,7 +3,7 @@ import Charts from "./Charts";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import { Button } from "antd";
-
+import { useApi } from "../shared/useApi";
 
 type ReportPreviewProps = {
     templateId: number;
@@ -32,50 +32,47 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
     const [isLoading, setIsLoading] = React.useState(false);
     const [previewData, setPreviewData] = React.useState<any>(null);
     const [error, setError] = React.useState<string>("");
+    const api = useApi();
 
     const aggType =
         Array.isArray(aggregationType) ? aggregationType.join(",") : aggregationType || "";
 
     React.useEffect(() => {
-        const controller = new AbortController();
+        let cancelled = false;
         setIsLoading(true);
         setError("");
         setPreviewData(null);
 
-        fetch("http://localhost:8000/telegram/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                template_id: templateId,
-                format,
-                period_type: scheduleType,
-                time_of_day: scheduleTime,
-                aggregation_type: aggType,
-                style_override: styleOverride,
-            }),
-            signal: controller.signal,
-        })
-            .then(async (resp) => {
+        (async () => {
+            try {
+                const data = await api.post<any>("/telegram/preview", {
+                    template_id: templateId,
+                    format,
+                    period_type: scheduleType,
+                    time_of_day: scheduleTime,
+                    aggregation_type: aggType,
+                    style_override: styleOverride,
+                });
+
+                if (cancelled) return;
                 setIsLoading(false);
-                if (!resp.ok) {
-                    setError("Ошибка сервера: " + resp.status);
-                    return;
-                }
-                const data = await resp.json();
-                if (data.ok) {
+
+                if (data?.ok) {
                     setPreviewData(data);
                     onSuccess?.();
                 } else {
-                    setError(data.detail || "Не удалось получить предпросмотр");
+                    setError(data?.detail || "Не удалось получить предпросмотр");
                 }
-            })
-            .catch((e) => {
-                if (e.name !== "AbortError") setError("Ошибка соединения: " + e?.message);
+            } catch (e: any) {
+                if (cancelled) return;
                 setIsLoading(false);
-            });
+                setError("Ошибка соединения: " + (e?.message || String(e)));
+            }
+        })();
 
-        return () => controller.abort();
+        return () => { cancelled = true; };
     }, [templateId, format, scheduleType, scheduleTime, aggType, onSuccess, styleKey]);
+
 
     // Удобные шорткаты
     const columns: string[] = previewData?.columns;

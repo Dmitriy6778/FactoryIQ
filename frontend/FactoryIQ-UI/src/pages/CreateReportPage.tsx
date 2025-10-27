@@ -4,6 +4,7 @@ import { saveAs } from "file-saver";
 import styles from "../styles/CreateReportPage.module.css";
 import BackButton from "../components/BackButton";
 import CustomReportTable from "../components/CustomReportTable";
+import { useApi } from "../shared/useApi";
 
 // Типы тегов
 type Tag = {
@@ -67,7 +68,6 @@ const REPORT_TYPES = [
   { key: "custom", label: "Настраиваемый отчёт" },
 ];
 
-const API_BASE = "http://localhost:8000";
 
 const CreateReportPage: React.FC = () => {
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -99,13 +99,13 @@ const CreateReportPage: React.FC = () => {
 
   // Получение всех тегов
   useEffect(() => {
-    fetch(`${API_BASE}/tags/all`)
+    fetch(`${useApi}/tags/all`)
       .then((res) => res.json())
       .then((data) => setAllTags(data.items || []));
   }, []);
 
   useEffect(() => {
-    fetch(`${API_BASE}/reports/templates`)
+    fetch(`${useApi}/reports/templates`)
       .then((res) => res.json())
       .then((data) => {
         if (data.ok) setTemplates(data.templates || []);
@@ -115,7 +115,7 @@ const CreateReportPage: React.FC = () => {
   const handleShowTags = (templateId: number) => {
     setSelectedTemplateId(templateId);
     setShowTemplateTags(false);
-    fetch(`${API_BASE}/reports/templates/${templateId}`)
+    fetch(`${useApi}/reports/templates/${templateId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.ok && data.template) {
@@ -127,7 +127,7 @@ const CreateReportPage: React.FC = () => {
 
   const handleDeleteTemplate = (templateId: number) => {
     if (!window.confirm("Удалить этот шаблон?")) return;
-    fetch(`${API_BASE}/reports/templates/${templateId}`, {
+    fetch(`${useApi}/reports/templates/${templateId}`, {
       method: "DELETE",
     })
       .then((res) => res.json())
@@ -176,7 +176,7 @@ const CreateReportPage: React.FC = () => {
 
   // Загрузка тегов шаблона по ID (чтобы заполнять selectedTags)
   async function loadTemplateTagsForReport(templateId: number): Promise<ReportTagSettings[]> {
-    const res = await fetch(`${API_BASE}/reports/templates/${templateId}`);
+    const res = await fetch(`${useApi}/reports/templates/${templateId}`);
     const data = await res.json();
     if (data.ok && data.template) {
       const selectedTagsFromTemplate: ReportTagSettings[] = (data.template.tags || []).map((t: ReportTemplateTag) => {
@@ -220,7 +220,7 @@ const CreateReportPage: React.FC = () => {
       }))
       : selectedTags;
 
-    fetch(`${API_BASE}/reports/templates/create`, {
+    fetch(`${useApi}/reports/templates/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -284,8 +284,8 @@ const CreateReportPage: React.FC = () => {
 
     const url =
       tplReportType === "balance"
-        ? `${API_BASE}/reports/build`
-        : `${API_BASE}/reports/build_custom`;
+        ? `${useApi}/reports/build`
+        : `${useApi}/reports/build_custom`;
 
     const payload =
       tplReportType === "balance"
@@ -397,7 +397,7 @@ const CreateReportPage: React.FC = () => {
 
     // Для custom-отчёта
     if (reportType === "custom") {
-      fetch(`${API_BASE}/reports/build_custom`, {
+      fetch(`${useApi}/reports/build_custom`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -434,7 +434,7 @@ const CreateReportPage: React.FC = () => {
     }
 
     // Для балансового отчёта
-    fetch(`${API_BASE}/reports/build`, {
+    fetch(`${useApi}/reports/build`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

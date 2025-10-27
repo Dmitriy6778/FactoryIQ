@@ -3,7 +3,7 @@ import styles from "../styles/SettingsPage.module.css";
 import logo from "../../assets/images/logo.jpeg";
 import { CheckCircle, XCircle, FileDown, FileUp, RefreshCw, Database } from "lucide-react";
 import BackButton from "../components/BackButton";
-
+import { useApi } from "../shared/useApi";
 /** ================================
  *  Типы
  *  ================================ */
@@ -39,38 +39,6 @@ const defaultDbConfig: DbConfig = {
   driver: "ODBC Driver 18 for SQL Server",
 };
 
-/** ================================
- *  Утилиты
- *  ================================ */
-const API = {
-  drivers: "http://localhost:8000/db/odbc-drivers",
-  sqlInstances: "http://localhost:8000/db/sql-instances",
-  listDatabases: "http://localhost:8000/db/list-databases",
-  checkConnection: "http://localhost:8000/db/check",
-
-  // НОВОЕ:
-  initFull: "http://localhost:8000/db/init-full",
-  initDb: "http://localhost:8000/db/init",          // оставим, вдруг понадобится отдельно
-  initProcs: "http://localhost:8000/db/init-procs",
-
-  saveConfig: "http://localhost:8000/db/config",
-  verifyStructure: "http://localhost:8000/db/verify-structure",
-  genClientCert: "http://localhost:8000/opcua/gen-client-cert",
-};
-
-
-async function fetchJSON<T = any>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, init);
-  const data = await res.json().catch(() => ({} as any));
-  if (!res.ok) {
-    const detail = data?.detail ?? data;
-    // просто пробрасываем JSON detail как строку
-    throw new Error(JSON.stringify(detail));
-  }
-  return data as T;
-}
-
-
 
 function downloadText(filename: string, text: string) {
   const blob = new Blob([text], { type: "application/json;charset=utf-8" });
@@ -86,7 +54,9 @@ function downloadText(filename: string, text: string) {
  *  Компонент
  *  ================================ */
 const SettingsPage: React.FC = () => {
+  const api = useApi();
   const [config, setConfig] = useState<DbConfig>(defaultDbConfig);
+
   const [isLoading, setIsLoading] = useState<string | null>(null);
   const [servers, setServers] = useState<string[]>([]);
   const [drivers, setDrivers] = useState<string[]>([]);
@@ -117,7 +87,8 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const data = await fetchJSON<{ drivers?: string[] }>(API.drivers);
+        const data = await api.get<{ drivers?: string[] }>("/db/odbc-drivers");
+
         setDrivers(data?.drivers || []);
       } catch {
         setDrivers([]);
@@ -129,7 +100,8 @@ const SettingsPage: React.FC = () => {
   const fetchSqlInstances = async () => {
     setIsLoading("servers");
     try {
-      const data = await fetchJSON<{ ok: boolean; servers: string[]; message?: string }>(API.sqlInstances);
+      const data = await api.get<{ ok: boolean; servers: string[]; message?: string }>("/db/sql-instances");
+
       if (data.ok && data.servers?.length) {
         setServers(data.servers);
         setConfig((cfg) => ({ ...cfg, server: data.servers[0] }));
@@ -146,11 +118,8 @@ const SettingsPage: React.FC = () => {
   const fetchDatabases = async () => {
     setIsLoading("databases");
     try {
-      const data = await fetchJSON<{ ok: boolean; databases: string[]; message?: string }>(API.listDatabases, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-      });
+      const data = await api.post<{ ok: boolean; databases: string[]; message?: string }>("/db/list-databases", config);
+
       if (data.ok) {
         setDbList(data.databases || []);
         setStatus("databases", true, `Найдено баз: ${data.databases.length}`);
@@ -166,7 +135,8 @@ const SettingsPage: React.FC = () => {
   const checkConnection = async () => {
     setIsLoading("connection");
     try {
-      const data = await fetchJSON<{ ok: boolean; message: string }>(API.checkConnection);
+      const data = await api.get<{ ok: boolean; message: string }>("/db/check");
+
       setStatus("connection", data.ok, data.message || (data.ok ? "Соединение успешно" : "Нет соединения"));
     } catch {
       setStatus("connection", false, "Ошибка сети или сервера");
@@ -177,17 +147,14 @@ const SettingsPage: React.FC = () => {
   const initDb = async () => {
     setIsLoading("initDb");
     try {
-      const data = await fetchJSON<{ ok: boolean; message: string }>(API.initFull, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          database: config.database,
-          with_procs: true,
-          create_if_missing: true,
-          dry_run: false,
-          elevate_with_windows_auth: true
-        }),
+      const data = await api.post<{ ok: boolean; message: string }>("/db/init-full", {
+        database: config.database,
+        with_procs: true,
+        create_if_missing: true,
+        dry_run: false,
+        elevate_with_windows_auth: true,
       });
+
       setStatus("initDb", data.ok, data.message || (data.ok ? "Структура БД инициализирована" : "Инициализация не выполнена"));
     } catch {
       setStatus("initDb", false, "Ошибка инициализации");
@@ -200,10 +167,9 @@ const SettingsPage: React.FC = () => {
     setIsLoading("dbStructure");
     setVerifyReport(null);
     try {
-      const data = await fetchJSON<VerifyResult>(API.verifyStructure, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ database: config.database, deep: true }),
+      const data = await api.post<VerifyResult>("/db/verify-structure", {
+        database: config.database,
+        deep: true,
       });
 
       const ok = !!data.ok;
@@ -239,11 +205,8 @@ const SettingsPage: React.FC = () => {
   const saveConfig = async () => {
     setIsLoading("saveConfig");
     try {
-      const data = await fetchJSON<{ ok: boolean; message?: string }>(API.saveConfig, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-      });
+      const data = await api.post<{ ok: boolean; message?: string }>("/db/config", config);
+
       setStatus("saveConfig", !!data.ok, data.message || (data.ok ? "Конфигурация сохранена" : "Ошибка сохранения"));
     } catch (e: any) {
       setStatus("saveConfig", false, "Ошибка сохранения");
@@ -254,7 +217,8 @@ const SettingsPage: React.FC = () => {
   const generateCerts = async () => {
     setIsLoading("certs");
     try {
-      const data = await fetchJSON<{ ok: boolean; message: string }>(API.genClientCert, { method: "POST" });
+      const data = await api.post<{ ok: boolean; message: string }>("/opcua/gen-client-cert", {});
+
       setStatus("certs", data.ok, data.message || (data.ok ? "Сертификаты сгенерированы" : "Ошибка генерации сертификатов"));
     } catch {
       setStatus("certs", false, "Ошибка генерации сертификатов");

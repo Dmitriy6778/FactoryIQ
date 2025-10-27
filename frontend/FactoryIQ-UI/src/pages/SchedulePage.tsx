@@ -36,7 +36,7 @@ import type { FormInstance } from "antd/es/form";
 import BackButton from "../components/BackButton";
 import ReportPreview from "../components/ReportPreview";
 import StyleModal from "../components/StyleModal";
-
+import { useApi } from "../shared/useApi";
 const DEBUG = false;
 
 /* -------- time utils (вместо dayjs) -------- */
@@ -257,7 +257,9 @@ const EditableCell: React.FC<EditableCellProps> = ({
 
 // ====== страница ======
 const SchedulePage: React.FC = () => {
+  const api = useApi();
   const [tasks, setTasks] = useState<Task[]>([]);
+
   const [templates, setTemplates] = useState<Template[]>([]);
   const [channels, setChannels] = useState<TgChannel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -279,15 +281,15 @@ const SchedulePage: React.FC = () => {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch("http://localhost:8000/telegram/tasks");
-      const data = await resp.json();
-      if (DEBUG) console.log("Загруженные задания (tasks):", data.tasks);
-      setTasks(data.tasks || []);
+      const data = await api.get<{ tasks: Task[] }>("/telegram/tasks");
+      if (DEBUG) console.log("Загруженные задания (tasks):", data?.tasks);
+      setTasks(data?.tasks || []);
     } catch {
       message.error("Ошибка загрузки заданий");
     }
     setLoading(false);
-  }, []);
+  }, [api]);
+
 
   useEffect(() => {
     loadTasks();
@@ -296,24 +298,24 @@ const SchedulePage: React.FC = () => {
   // ====== шаблоны ======
   const loadTemplates = useCallback(async () => {
     try {
-      const resp = await fetch("http://localhost:8000/reports/templates");
-      const data = await resp.json();
-      setTemplates(data.templates || []);
+      const data = await api.get<{ templates: Template[] }>("/reports/templates");
+      setTemplates(data?.templates || []);
     } catch {
       message.error("Ошибка загрузки шаблонов");
     }
-  }, []);
+  }, [api]);
+
 
   // ====== каналы ======
   const loadChannels = useCallback(async () => {
     try {
-      const resp = await fetch("http://localhost:8000/tg/channels");
-      const data: TgChannel[] = await resp.json();
+      const data = await api.get<TgChannel[]>("/tg/channels");
       setChannels((data || []).filter((c) => c.Active));
     } catch {
       message.error("Ошибка загрузки Telegram-каналов");
     }
-  }, []);
+  }, [api]);
+
 
   useEffect(() => {
     loadChannels();
@@ -364,15 +366,7 @@ const SchedulePage: React.FC = () => {
             : row.aggregation_type,
           send_format: row.send_format,
         };
-        const resp = await fetch(
-          `http://localhost:8000/telegram/tasks/${row.id}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(prepared),
-          }
-        );
-        if (!resp.ok) throw new Error();
+        await api.put(`/telegram/tasks/${row.id}`, prepared);
         message.success("Задание обновлено");
         await loadTasks();
       } catch {
@@ -380,8 +374,9 @@ const SchedulePage: React.FC = () => {
       }
       setLoading(false);
     },
-    [loadTasks]
+    [api, loadTasks]
   );
+
 
   const handlePreview = useCallback((record: Task) => {
     if (DEBUG) console.log("Открытие предпросмотра, задача:", record);
@@ -408,11 +403,7 @@ const SchedulePage: React.FC = () => {
     async (id: number) => {
       setLoading(true);
       try {
-        const resp = await fetch(
-          `http://localhost:8000/telegram/tasks/${id}/activate`,
-          { method: "POST" }
-        );
-        if (!resp.ok) throw new Error();
+        await api.post(`/telegram/tasks/${id}/activate`, {});
         message.success("Задание включено");
         await loadTasks();
       } catch {
@@ -420,17 +411,15 @@ const SchedulePage: React.FC = () => {
       }
       setLoading(false);
     },
-    [loadTasks]
+    [api, loadTasks]
   );
+
 
   const handleDelete = useCallback(
     async (id: number) => {
       setLoading(true);
       try {
-        const resp = await fetch(`http://localhost:8000/telegram/tasks/${id}`, {
-          method: "DELETE",
-        });
-        if (!resp.ok) throw new Error();
+        await api.del(`/telegram/tasks/${id}`);
         message.success("Задание удалено");
         await loadTasks();
       } catch {
@@ -438,8 +427,9 @@ const SchedulePage: React.FC = () => {
       }
       setLoading(false);
     },
-    [loadTasks]
+    [api, loadTasks]
   );
+
 
   const handleAddTask = useCallback(
     async (values: any) => {
@@ -463,28 +453,24 @@ const SchedulePage: React.FC = () => {
           const shiftTimes = ["08:00:00", "20:00:00"];
           const results: any[] = [];
           for (const time of shiftTimes) {
-            const resp = await fetch("http://localhost:8000/telegram/tasks", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                template_id,
-                period_type,
-                time_of_day: time,
-                target_type,
-                target_value: String(target_value),
-                aggregation_type: aggValue,
-                send_format,
-              }),
+            const res = await api.post("/telegram/tasks", {
+              template_id,
+              period_type,
+              time_of_day: time,
+              target_type,
+              target_value: String(target_value),
+              aggregation_type: aggValue,
+              send_format,
             });
-            results.push(await resp.json());
+            results.push(res);
           }
-          if (results.every((r) => r.ok)) {
+          if (results.every((r: any) => r?.ok)) {
             message.success("Задания по сменам успешно созданы");
             setModalOpen(false);
             form.resetFields();
             await loadTasks();
           } else if (
-            results.some((r) => String(r?.detail || "").includes("существует"))
+            results.some((r: any) => String(r?.detail || "").includes("существует"))
           ) {
             message.warning("Некоторые сменные расписания уже существуют");
           } else {
@@ -494,19 +480,16 @@ const SchedulePage: React.FC = () => {
           let timeStr = "";
           if (period_type === "daily" || period_type === "once") {
             timeStr =
-              normalizeTimeStr(
-                typeof time_of_day === "string" ? time_of_day : ""
-              ) || "08:00:00";
+              normalizeTimeStr(typeof time_of_day === "string" ? time_of_day : "") ||
+              "08:00:00";
           } else if (period_type === "hourly") {
             timeStr = "00:00:00";
           } else {
             timeStr = normalizeTimeStr(time_of_day) || "08:00:00";
           }
 
-          const resp = await fetch("http://localhost:8000/telegram/tasks", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          try {
+            const res = await api.post("/telegram/tasks", {
               template_id,
               period_type,
               time_of_day: timeStr,
@@ -514,18 +497,19 @@ const SchedulePage: React.FC = () => {
               target_value: String(target_value),
               aggregation_type: aggValue,
               send_format,
-            }),
-          });
-
-          if (resp.status === 409) {
-            message.warning("Такое расписание уже существует");
-          } else if (!resp.ok) {
+            });
+            if (res?.status === 409 || String(res?.detail || "").includes("существует")) {
+              message.warning("Такое расписание уже существует");
+            } else if (res?.ok === false) {
+              message.error("Ошибка при добавлении задания");
+            } else {
+              message.success("Задание добавлено");
+              setModalOpen(false);
+              form.resetFields();
+              await loadTasks();
+            }
+          } catch {
             message.error("Ошибка при добавлении задания");
-          } else {
-            message.success("Задание добавлено");
-            setModalOpen(false);
-            form.resetFields();
-            await loadTasks();
           }
         }
       } catch {
@@ -533,8 +517,9 @@ const SchedulePage: React.FC = () => {
       }
       setLoading(false);
     },
-    [form, loadTasks]
+    [api, form, loadTasks]
   );
+
 
   // ====== конфиг мультиселекта ======
 

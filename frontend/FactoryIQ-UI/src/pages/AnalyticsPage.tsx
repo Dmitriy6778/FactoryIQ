@@ -1,9 +1,11 @@
+// client/src/pages/AnalyticsPage.tsx
 import React, { useState, useEffect, useRef } from "react";
 import styles from "../styles/AnalyticsPage.module.css";
 import { BarChart2 } from "lucide-react";
 import Charts from "../components/Charts";
 import TagChipList from "../components/TagChipList";
 import BackButton from "../components/BackButton";
+import { useApi } from "../shared/useApi";
 
 // Типы
 type Tag = {
@@ -52,6 +54,8 @@ function getRandomColorHex() {
 }
 
 const AnalyticsPage: React.FC = () => {
+    const api = useApi();
+
     const [tags, setTags] = useState<Tag[]>([]);
     const [tagFilter, setTagFilter] = useState("");
     const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
@@ -85,12 +89,15 @@ const AnalyticsPage: React.FC = () => {
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // теги
     useEffect(() => {
-        fetch("http://localhost:8000/tags/all")
-            .then((res) => res.json())
-            .then((res) => setTags(res.items || []));
-    }, []);
+        api
+            .get<{ items: Tag[] }>("/tags/all")
+            .then((res) => setTags(res.items || []))
+            .catch(() => setTags([]));
+    }, [api]);
 
+    // цвета серий
     useEffect(() => {
         const count = analyticType === "shift_delta" ? selectedTags.length * 2 : selectedTags.length;
         setSeriesColors(Array(count).fill(0).map(() => getRandomColorHex()));
@@ -162,52 +169,59 @@ const AnalyticsPage: React.FC = () => {
             const toSql = toSqlDatetime(dateTo);
 
             for (const tag of selectedTags) {
-                let url = "";
                 if (analyticType === "trend") {
-                    url = `http://localhost:8000/analytics/trend?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
-                } else if (analyticType === "daily_delta") {
-                    url = `http://localhost:8000/analytics/daily-delta?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
-                } else if (analyticType === "shift_delta") {
-                    url = `http://localhost:8000/analytics/shift-delta?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
-                } else if (analyticType === "aggregate") {
-                    if (aggregateType === "AVG") {
-                        url = `http://localhost:8000/analytics/avg-trend?tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}&interval_minutes=${averageInterval}`;
-                    } else {
-                        url = `http://localhost:8000/analytics/aggregate?agg_type=${aggregateType}&tag_id=${tag.id}&date_from=${encodeURIComponent(fromSql)}&date_to=${encodeURIComponent(toSql)}`;
-                    }
-                }
-
-                const resp = await fetch(url);
-                if (!resp.ok) {
-                    const text = await resp.text();
-                    alert(`Ошибка ${resp.status}: ${text}`);
-                    setLoading(false);
-                    return;
-                }
-                const res = await resp.json();
-
-                if (analyticType === "shift_delta") {
-                    const label = tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`;
-                    const datasets = groupShiftsForChart(res.items || [], label);
-                    allData.push(...datasets);
-                } else if (analyticType === "aggregate" && aggregateType === "AVG") {
+                    const res = await api.get<{ items: any[] }>("/analytics/trend", {
+                        tag_id: tag.id,
+                        date_from: fromSql,
+                        date_to: toSql,
+                    });
                     allData.push({
                         label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
                         data: (res.items || []).map((row: any) => ({ x: row.timestamp, y: row.value })),
                     });
+                } else if (analyticType === "daily_delta") {
+                    const res = await api.get<{ items: any[] }>("/analytics/daily-delta", {
+                        tag_id: tag.id,
+                        date_from: fromSql,
+                        date_to: toSql,
+                    });
+                    allData.push({
+                        label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
+                        data: (res.items || []).map((row: any) => ({ x: row.day, y: row.delta })),
+                    });
+                } else if (analyticType === "shift_delta") {
+                    const res = await api.get<{ items: any[] }>("/analytics/shift-delta", {
+                        tag_id: tag.id,
+                        date_from: fromSql,
+                        date_to: toSql,
+                    });
+                    const label = tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`;
+                    const datasets = groupShiftsForChart(res.items || [], label);
+                    allData.push(...datasets);
                 } else if (analyticType === "aggregate") {
-                    allData.push({
-                        label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
-                        data: (res.items || []).map((row: any) => ({ x: fromSql + " - " + toSql, y: row.result })),
-                    });
-                } else {
-                    allData.push({
-                        label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
-                        data: (res.items || []).map((row: any) => ({
-                            x: row.timestamp || row.day || row.shift_start,
-                            y: row.value ?? row.delta ?? row.result,
-                        })),
-                    });
+                    if (aggregateType === "AVG") {
+                        const res = await api.get<{ items: any[] }>("/analytics/avg-trend", {
+                            tag_id: tag.id,
+                            date_from: fromSql,
+                            date_to: toSql,
+                            interval_minutes: averageInterval,
+                        });
+                        allData.push({
+                            label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
+                            data: (res.items || []).map((row: any) => ({ x: row.timestamp, y: row.value })),
+                        });
+                    } else {
+                        const res = await api.get<{ items: any[] }>("/analytics/aggregate", {
+                            agg_type: aggregateType,
+                            tag_id: tag.id,
+                            date_from: fromSql,
+                            date_to: toSql,
+                        });
+                        allData.push({
+                            label: tag.browse_name || tag.name || tag.TagName || `Тег ${tag.id}`,
+                            data: (res.items || []).map((row: any) => ({ x: fromSql + " - " + toSql, y: row.result })),
+                        });
+                    }
                 }
             }
 
@@ -217,8 +231,8 @@ const AnalyticsPage: React.FC = () => {
                 backgroundColor: chartType === "bar" ? hexToRgba(seriesColors[i] || "#00ffc6", 0.5) : seriesColors[i] || "#00ffc6",
             }));
             setData(coloredData);
-        } catch (err) {
-            alert("Network error: " + err);
+        } catch (err: any) {
+            alert("Network error: " + (err?.message || err));
         }
         setLoading(false);
     };

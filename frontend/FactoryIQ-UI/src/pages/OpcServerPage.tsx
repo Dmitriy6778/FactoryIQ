@@ -10,6 +10,10 @@ import {
 } from "lucide-react";
 import BackButton from "../components/BackButton";
 import { Tree } from "antd";
+import { useApi } from "../shared/useApi";
+
+const API_BASE = ((import.meta as any).env?.VITE_API_BASE || "") as string;
+const api = useApi();
 
 type TreeNode = {
   title: string;
@@ -91,8 +95,7 @@ const OpcServerPage: React.FC = () => {
       security_policy: selectedServer.securityPolicy || "Basic256Sha256",
       security_mode: selectedServer.securityMode || "Sign",
     }).toString();
-    const res = await fetch(`http://localhost:8000/tags/browse_full?${params}`);
-    const data = await res.json();
+    const data = await api.get<{ items: OpcTag[] }>("/tags/browse_full", Object.fromEntries(new URLSearchParams(params)));
     const nodes = (data.items || []).map((tag: OpcTag) => ({
       title: tag.browse_name,
       key: tag.node_id,
@@ -107,19 +110,19 @@ const OpcServerPage: React.FC = () => {
     if (!window.confirm("Создать полную карту тегов для этого сервера? Это может занять несколько минут.")) return;
     setIsScanningFullTree(true);   // включаем лоадер!
     try {
-      const res = await fetch("http://localhost:8000/servers/scan_full_tree", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await api.post<{ count: number; inserted: number; debug_first_tags?: any[] }>(
+        "/servers/scan_full_tree",
+        {
           server_id: srv.id,
           endpoint_url: srv.endpoint_url,
           opcUsername: srv.opcUsername || "",
           opcPassword: srv.opcPassword || "",
           securityPolicy: srv.securityPolicy || "Basic256Sha256",
           securityMode: srv.securityMode || "Sign",
-        }),
-      });
-      const data = await res.json();
+        }
+      );
+
+
       console.log("[FRONT] Ответ на карту тегов:", data);
       alert(
         `Готово! Найдено ${data.count}, сохранено ${data.inserted} тегов.\n\nПервые теги:\n` +
@@ -169,8 +172,7 @@ const OpcServerPage: React.FC = () => {
 
   // --- Получение справочников, серверов и т.д. ---
   useEffect(() => {
-    fetch("http://localhost:8000/servers/opc_security_options")
-      .then((res) => res.json())
+    api.get<any>("/servers/opc_security_options")
       .then((opts) => {
         setSecurityPolicies(opts.policies && opts.policies.length > 0 ? opts.policies : DEFAULT_POLICIES);
         setSecurityModes(opts.modes && opts.modes.length > 0 ? opts.modes : DEFAULT_MODES);
@@ -191,15 +193,17 @@ const OpcServerPage: React.FC = () => {
       });
   }, []);
   useEffect(() => {
-    fetch("http://localhost:8000/polling/polling-intervals")
-      .then((res) => res.json())
+    api.get<{ items: { id: number; name: string; intervalSeconds: number }[] }>("/polling/polling-intervals")
       .then((data) => setIntervals(data.items || []));
+
   }, []);
   useEffect(() => { fetchServers(); }, []);
+
   const fetchServers = async () => {
-    const res = await fetch("http://localhost:8000/servers/servers");
-    setServers(await res.json());
+    const data = await api.get<OpcServer[]>("/servers/servers");
+    setServers(data || []);
   };
+
 
   // --- Функции работы с серверами (добавление/удаление/изменение) ---
   const checkServer = async () => {
@@ -211,20 +215,13 @@ const OpcServerPage: React.FC = () => {
       securityMode: newServer.securityMode || DEFAULT_MODES[0],
     }).toString();
     setProbeResult("Проверка...");
-    const res = await fetch(
-      `http://localhost:8000/servers/probe?${queryParams}`
-    );
-    const data = await res.json();
-    setProbeResult(data.message || "Ошибка проверки");
+    const data = await api.get<{ message?: string }>("/servers/probe", Object.fromEntries(new URLSearchParams(queryParams)));
+    setProbeResult(data?.message || "Ошибка проверки");
   };
 
   const handleAddServer = async () => {
-    const res = await fetch("http://localhost:8000/servers/servers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newServer),
-    });
-    const data = await res.json();
+    const data = await api.post<{ id?: number }>("/servers/servers", newServer);
+
     if (data.id) {
       fetchServers();
       setNewServer({
@@ -239,24 +236,20 @@ const OpcServerPage: React.FC = () => {
   };
 
   const handleSaveServer = async (srv: OpcServer) => {
-    const res = await fetch(`http://localhost:8000/servers/servers/${srv.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(srv),
-    });
-    if (res.ok) {
-      setEditingServer(null);
-      fetchServers();
-    } else {
-      alert("Ошибка сохранения изменений");
-    }
+    await api.put(`/servers/servers/${srv.id}`, srv);
+    setEditingServer(null);
+    fetchServers();
   };
 
   const handleDeleteServer = async (id?: number) => {
     if (!id || !window.confirm("Удалить этот сервер?")) return;
-    const res = await fetch(`http://localhost:8000/servers/servers/${id}`, { method: "DELETE" });
-    if (res.ok) fetchServers();
-    else alert("Ошибка удаления. Возможно, есть связанные задачи.");
+    try {
+      await api.del(`/servers/servers/${id}`);
+      fetchServers();
+    } catch {
+      alert("Ошибка удаления. Возможно, есть связанные задачи.");
+    }
+
   };
 
   // --- Сканирование сети ---
@@ -264,9 +257,11 @@ const OpcServerPage: React.FC = () => {
     setScanLog([]);
     setFoundServers([]);
     setIsScanning(true);
+    const base = API_BASE ? API_BASE.replace(/\/$/, "") : "";
     const eventSource = new EventSource(
-      `http://localhost:8000/servers/netscan_stream?ip_start=${ipStart}&ip_end=${ipEnd}&ports=4840,4841,4849`
+      `${base}/servers/netscan_stream?ip_start=${encodeURIComponent(ipStart)}&ip_end=${encodeURIComponent(ipEnd)}&ports=4840,4841,4849`
     );
+
     eventSource.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === "log") {
@@ -333,25 +328,22 @@ const OpcServerPage: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(
-        "http://localhost:8000/polling/start_selected_polling",
+      const data = await api.post<{ ok: boolean; task_id?: number; message?: string }>(
+        "/polling/start_selected_polling",
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            server_id: selectedServer.id,
-            endpoint_url: selectedServer.endpoint_url,
-            tags: selectedTags.map((t) => ({
-              node_id: t.node_id,
-              browse_name: t.browse_name,
-              data_type: t.data_type || "",
-              description: t.description || "",
-            })),
-            interval_id: selectedIntervalId,
-          }),
+          server_id: selectedServer.id,
+          endpoint_url: selectedServer.endpoint_url,
+          tags: selectedTags.map((t) => ({
+            node_id: t.node_id,
+            browse_name: t.browse_name,
+            data_type: t.data_type || "",
+            description: t.description || "",
+          })),
+          interval_id: selectedIntervalId,
         }
       );
-      const data = await res.json();
+
+
       if (data.ok) {
         alert(`Опрос выбранных тегов запущен (task_id=${data.task_id})`);
         setRecording(true);
@@ -379,25 +371,21 @@ const OpcServerPage: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(
-        "http://localhost:8000/polling/start_selected_polling",
+      const data = await api.post<{ ok: boolean; task_id?: number; message?: string }>(
+        "/polling/start_selected_polling",
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            server_id: selectedServer.id,
-            endpoint_url: selectedServer.endpoint_url,
-            tags: tagsInBranch.map((t) => ({
-              node_id: t.node_id,
-              browse_name: t.browse_name,
-              data_type: t.data_type || "",
-              description: t.description || "",
-            })),
-            interval_id: selectedIntervalId,
-          }),
+          server_id: selectedServer.id,
+          endpoint_url: selectedServer.endpoint_url,
+          tags: tagsInBranch.map((t) => ({
+            node_id: t.node_id,
+            browse_name: t.browse_name,
+            data_type: t.data_type || "",
+            description: t.description || "",
+          })),
+          interval_id: selectedIntervalId,
         }
       );
-      const data = await res.json();
+
       if (data.ok) {
         alert(`Опрос всей ветки запущен (task_id=${data.task_id})`);
         setRecording(true);

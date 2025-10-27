@@ -17,7 +17,7 @@ import {
 } from "antd";
 import ReportPreview from "./ReportPreview";
 import styles from "./StyleModal.module.css";
-
+import { useApi } from "../shared/useApi";
 /** ================================
  *  Props
  *  ================================ */
@@ -296,7 +296,7 @@ const StyleModal: React.FC<Props> = ({
   zIndex = 1100,
 }) => {
   const [form] = Form.useForm();
-
+  const api = useApi();
   // состояние, которое уходит в предпросмотр и сохранение
   const [styleOverride, setStyleOverride] = React.useState<any>({
     chart: DEFAULT_CHART,
@@ -320,23 +320,18 @@ const StyleModal: React.FC<Props> = ({
 
     (async () => {
       try {
-        const t = await fetch(
-          `http://localhost:8000/reports/templates/${templateId}`
-        );
-        const tjson = await t.json();
+        const tjson = await api.get<any>(`/reports/templates/${templateId}`);
 
         let chart = DEFAULT_CHART;
         let table = DEFAULT_TABLE;
         let excel = DEFAULT_EXCEL;
         let styleName = "";
 
-        if (t.ok && tjson?.ok && tjson?.template?.style_id) {
+        if (tjson?.template?.style_id) {
           const sid = tjson.template.style_id;
 
-          const s = await fetch(`http://localhost:8000/styles/${sid}`);
-          const sjson = await s.json();
-
-          if (s.ok && sjson?.ok) {
+          const sjson = await api.get<any>(`/styles/${sid}`);
+          if (sjson?.ok) {
             const norm = normalizeStyleResponse(sjson);
             chart = sanitizeChart(norm.chart);
             table = sanitizeTable(norm.table);
@@ -360,9 +355,7 @@ const StyleModal: React.FC<Props> = ({
             ...chart,
             palette: {
               ...chart.palette,
-              multi: Array.isArray(chart.palette?.multi)
-                ? [...chart.palette.multi]
-                : [],
+              multi: Array.isArray(chart.palette?.multi) ? [...chart.palette.multi] : [],
             },
           },
           table: { ...table },
@@ -381,9 +374,7 @@ const StyleModal: React.FC<Props> = ({
             ...chart,
             palette: {
               ...chart.palette,
-              multi: Array.isArray(chart.palette?.multi)
-                ? [...chart.palette.multi]
-                : [],
+              multi: Array.isArray(chart.palette?.multi) ? [...chart.palette.multi] : [],
             },
           },
           table: { ...table },
@@ -396,6 +387,8 @@ const StyleModal: React.FC<Props> = ({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, templateId]);
+
+
 
   /** Любое изменение формы → чистим цвета и кладём в state */
   const handleValuesChange = (_: any, all: any) => {
@@ -460,55 +453,35 @@ const StyleModal: React.FC<Props> = ({
       const values = form.getFieldsValue(true);
       const payload = JSON.parse(JSON.stringify(styleOverride));
       const name =
-        values?.__styleName?.trim() ||
-        `Стиль от ${new Date().toLocaleDateString()}`;
+        values?.__styleName?.trim() || `Стиль от ${new Date().toLocaleDateString()}`;
 
       const ChartStyle = JSON.stringify(payload.chart ?? {});
       const TableStyle = JSON.stringify(payload.table ?? {});
       const ExcelStyle = JSON.stringify(payload.excel ?? {});
 
-      const resp = await fetch("http://localhost:8000/styles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          is_default: false,
-
-          // текущее API
-          ChartStyle,
-          TableStyle,
-          ExcelStyle,
-
-          // и на будущее
-          chart: payload.chart,
-          table: payload.table,
-          excel: payload.excel,
-        }),
+      const data = await api.post<any>("/styles", {
+        name,
+        is_default: false,
+        // текущее API
+        ChartStyle,
+        TableStyle,
+        ExcelStyle,
+        // и на будущее
+        chart: payload.chart,
+        table: payload.table,
+        excel: payload.excel,
       });
-      if (!resp.ok)
-        throw new Error((await resp.text()) || "Не удалось сохранить стиль");
-      const data = await resp.json();
-      const styleId = data.id;
 
-      const bind = await fetch(
-        `http://localhost:8000/reports/templates/${templateId}/style`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ style_id: styleId }),
-        }
-      );
-      if (!bind.ok)
-        throw new Error(
-          (await bind.text()) || "Не удалось привязать стиль к шаблону"
-        );
+      const styleId = data.id;
+      await api.put(`/reports/templates/${templateId}/style`, { style_id: styleId });
 
       message.success("Стиль сохранён и привязан к шаблону");
       onClose();
     } catch (e: any) {
-      message.error(e.message || "Ошибка сохранения");
+      message.error(e?.message || "Ошибка сохранения");
     }
   };
+
 
   /** Показываем только нужные вкладки по текущему предпросмотру */
   const visibleKeys =

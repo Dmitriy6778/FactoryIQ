@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import styles from "../styles/PollingTasksPage.module.css";
 import BackButton from "../components/BackButton"; // Импортируем кнопку назад
+import { useApi } from "../shared/useApi";
 
 type OpcTag = {
   id: number;
@@ -27,34 +28,33 @@ type PollingInterval = {
   type: string;
 };
 
-const API = "http://localhost:8000/polling/polling-tasks";
 
 const PollingTasksPage: React.FC = () => {
+  const api = useApi();
   const [tasks, setTasks] = useState<PollingTask[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [intervals, setIntervals] = useState<PollingInterval[]>([]);
   const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
 
   // Получить интервалы
   const fetchIntervals = async () => {
-    const res = await fetch("http://localhost:8000/polling/polling-intervals");
-    const data = await res.json();
-    setIntervals(data.items || []);
+    const data = await api.get<{ items: PollingInterval[] }>("/polling/polling-intervals");
+    setIntervals(data?.items || []);
   };
 
   // Получить список задач
   const fetchTasks = async () => {
     setLoading(true);
-    const res = await fetch(API);
-    const data = await res.json();
-    // Обеспечиваем наличие массива tags у каждой задачи
-    const fixedTasks = (data.tasks || []).map((task: any) => ({
+    const data = await api.get<{ tasks: PollingTask[] }>("/polling/polling-tasks");
+    const fixedTasks = (data?.tasks || []).map((task: any) => ({
       ...task,
       tags: Array.isArray(task.tags) ? task.tags : [],
     }));
     setTasks(fixedTasks);
     setLoading(false);
   };
+
 
   useEffect(() => {
     fetchIntervals();
@@ -64,50 +64,41 @@ const PollingTasksPage: React.FC = () => {
   }, []);
 
   const stopTask = async (id: number) => {
-    await fetch("http://localhost:8000/polling/polling-tasks/stop", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: id }),
-    });
+    await api.post("/polling/polling-tasks/stop", { task_id: id });
     fetchTasks();
   };
+
 
   const deleteTask = async (id: number) => {
-    await fetch("http://localhost:8000/polling/polling-tasks/delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: id }),
-    });
+    await api.post("/polling/polling-tasks/delete", { task_id: id });
     fetchTasks();
   };
 
+
   const startTask = async (id: number) => {
-    await fetch("http://localhost:8000/polling/polling-tasks/start-by-id", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: id }),
-    });
+    await api.post("/polling/polling-tasks/start-by-id", { task_id: id });
     fetchTasks();
   };
 
   const stopAll = async () => {
-    await fetch("http://localhost:8000/polling/stop_all", { method: "POST" });
+    await api.post("/polling/stop_all", {});
     fetchTasks();
   };
 
   const startAll = async () => {
-    await fetch("http://localhost:8000/polling/start_all", { method: "POST" });
+    await api.post("/polling/start_all", {});
     fetchTasks();
   };
 
   const changeInterval = async (taskId: number, intervalId: number) => {
-    await fetch("http://localhost:8000/polling/polling-tasks/update-interval", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: taskId, interval_id: intervalId }),
+    await api.post("/polling/polling-tasks/update-interval", {
+      task_id: taskId,
+      interval_id: intervalId,
     });
     fetchTasks();
   };
+
+
 
   const handleShowTags = (taskId: number) => {
     setExpandedTaskId(expandedTaskId === taskId ? null : taskId);

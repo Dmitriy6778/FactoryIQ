@@ -2,6 +2,9 @@ import React, { useEffect, useState, useRef } from "react";
 import styles from "../styles/OpcTagsPage.module.css";
 import BackButton from "../components/BackButton";
 import { CheckCircle, AlertTriangle, XCircle } from "lucide-react";
+import { useApi } from "../shared/useApi";
+
+const api = useApi();
 
 type PollingInterval = {
   id: number;
@@ -67,19 +70,17 @@ const OpcTagsPage: React.FC = () => {
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Загрузка серверов и интервалов при инициализации
   useEffect(() => {
-    fetch("http://localhost:8000/servers/servers")
-      .then(res => res.json())
-      .then(data => {
-        setServers(data);
-        if (data.length > 0) setSelectedServer(data[0]);
-      });
-    fetch("http://localhost:8000/polling/polling-intervals")
-      .then(res => res.json())
-      .then(data => {
-        setIntervals(data.items || []);
-        if (data.items && data.items.length > 0) setSelectedIntervalId(data.items[0].id);
-      });
+    api.get<OpcServer[]>("/servers/servers").then((data) => {
+      setServers(data || []);
+      if (data && data.length > 0) setSelectedServer(data[0]);
+    });
+    api.get<{ items: PollingInterval[] }>("/polling/polling-intervals").then((data) => {
+      const items = data?.items || [];
+      setIntervals(items);
+      if (items.length > 0) setSelectedIntervalId(items[0].id);
+    });
   }, []);
+
 
   function makeQueryParams(forPage = page) {
     const params = new URLSearchParams();
@@ -94,17 +95,18 @@ const OpcTagsPage: React.FC = () => {
   function fetchTags(newPage = page) {
     setLoading(true);
     const params = makeQueryParams(newPage);
-    fetch(`http://localhost:8000/tags/all-tags?${params}`)
-      .then(res => res.json())
-      .then(data => {
-        setTags(data.items || []);
-        setTotal(data.total || 0);
+    const q = Object.fromEntries(params as any);
+    api.get<{ items: OpcTag[]; total: number }>("/tags/all-tags", q)
+      .then((data) => {
+        setTags(data?.items || []);
+        setTotal(data?.total || 0);
         setPage(newPage);
         setCheckedTagIds([]);
       })
-      .catch(e => console.error("[OpcTagsPage] Ошибка загрузки тегов:", e))
+      .catch((e) => console.error("[OpcTagsPage] Ошибка загрузки тегов:", e))
       .finally(() => setLoading(false));
   }
+
 
   // --- ПРОБА СОЕДИНЕНИЯ ---
   const probePlc = () => {
@@ -120,9 +122,8 @@ const OpcTagsPage: React.FC = () => {
       securityPolicy: selectedServer.securityPolicy || "Basic256Sha256",
       securityMode: selectedServer.securityMode || "Sign",
     }).toString();
-    fetch(`http://localhost:8000/servers/probe?${queryParams}`)
-      .then(res => res.json())
-      .then(data => setPlcStatus(data.ok ? "online" : "offline"))
+    api.get<{ ok?: boolean }>("/servers/probe", Object.fromEntries(new URLSearchParams(queryParams)))
+      .then((data) => setPlcStatus(data?.ok ? "online" : "offline"))
       .catch(() => setPlcStatus("offline"));
   };
 
@@ -131,21 +132,17 @@ const OpcTagsPage: React.FC = () => {
       return;
     }
     setLoading(true);
-    fetch("http://localhost:8000/tags/live", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tag_ids: tagIds,
-        server_id: selectedServer.id,
-      }),
+    api.post<{ ok: boolean; values?: Record<string, any> }>("/tags/live", {
+      tag_ids: tagIds,
+      server_id: selectedServer.id,
     })
-      .then(res => res.json())
-      .then(data => {
-        if (data.ok) setLiveValues(data.values || {});
+      .then((data) => {
+        if (data?.ok) setLiveValues(data.values || {});
         else setLiveValues({});
       })
       .catch(() => setLiveValues({}))
       .finally(() => setLoading(false));
+
   }
 
   function handleFilterChange(field: keyof TagFilters, value: string) {
@@ -169,11 +166,8 @@ const OpcTagsPage: React.FC = () => {
 
   async function handleDescriptionChange(tag: OpcTag, newDesc: string) {
     try {
-      await fetch(`http://localhost:8000/tags/${tag.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: newDesc }),
-      });
+      await api.put(`/tags/${tag.id}`, { description: newDesc });
+
       setTags(ts => ts.map(t => (t.id === tag.id ? { ...t, description: newDesc } : t)));
     } catch (e) {
       console.error("[OpcTagsPage] Ошибка обновления описания тега:", e);
@@ -183,7 +177,8 @@ const OpcTagsPage: React.FC = () => {
   async function handleDelete(id: number) {
     if (!window.confirm("Удалить этот тег?")) return;
     try {
-      await fetch(`http://localhost:8000/tags/${id}`, { method: "DELETE" });
+      await api.del(`/tags/${id}`);
+
       fetchTags();
     } catch (e) {
       console.error("[OpcTagsPage] Ошибка удаления тега:", e);
@@ -212,12 +207,13 @@ const OpcTagsPage: React.FC = () => {
       interval_id: selectedIntervalId,
     };
     try {
-      const res = await fetch("http://localhost:8000/polling/start_selected_polling", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
+      const data = await api.post<{
+        ok: boolean;
+        task_id?: number;
+        added_tags?: any[];
+        message?: string;
+      }>("/polling/start_selected_polling", body);
+
       if (data.ok) {
         if (data.added_tags && data.added_tags.length > 0) {
           alert(`Теги добавлены к существующей задаче (task_id=${data.task_id}).\nДобавлено: ${data.added_tags.length}`);

@@ -7,3 +7,4 @@ pydantic
 pydantic-core
 typing-extensions
 matplotlib
+python-jose[cryptography]

@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import BackButton from "../components/BackButton";
 import styles from "../styles/TelegramChannelsPage.module.css";
-
+import { useApi } from "../shared/useApi";
 /** ---------- Типы ---------- */
 type TgChannel = {
   id: number;
@@ -20,24 +20,6 @@ type TgChannel = {
 };
 
 type ApiList = TgChannel[] | { items: TgChannel[] };
-
-/** ---------- API ---------- */
-const API = {
-  list: "http://localhost:8000/tg/channels",
-  create: "http://localhost:8000/tg/channels",
-  update: (id: number) => `http://localhost:8000/tg/channels/${id}`,
-  remove: (id: number) => `http://localhost:8000/tg/channels/${id}`,
-};
-
-async function fetchJSON<T = any>(
-  input: RequestInfo,
-  init?: RequestInit
-): Promise<T> {
-  const res = await fetch(input, init);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(JSON.stringify(data?.detail ?? data ?? {}));
-  return data as T;
-}
 
 /** Бэкенд отдаёт PascalCase; нормализуем к нашему типу */
 const normalize = (r: any): TgChannel => ({
@@ -65,6 +47,7 @@ const emptyForm: TgChannel = {
 
 /** ---------- Компонент ---------- */
 const TelegramChannelsPage: React.FC = () => {
+  const api = useApi();
   const [rows, setRows] = useState<TgChannel[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -87,9 +70,10 @@ const TelegramChannelsPage: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await fetchJSON<ApiList>(API.list);
+      const data = await api.get<ApiList>("/tg/channels");
       const list = Array.isArray(data) ? data : data.items ?? [];
       setRows(list.map(normalize));
+
     } catch (e) {
       console.error("load:", e);
       alert("Не удалось загрузить список каналов");
@@ -123,18 +107,11 @@ const TelegramChannelsPage: React.FC = () => {
 
       const payload = toApiPayload(form);
       if (editing) {
-        await fetchJSON(API.update(editing.id), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+        await api.put(`/tg/channels/${editing.id}`, payload);
       } else {
-        await fetchJSON(API.create, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+        await api.post("/tg/channels", payload);
       }
+
       setOpen(false);
       setEditing(null);
       await load();
@@ -147,7 +124,8 @@ const TelegramChannelsPage: React.FC = () => {
   const removeRow = async (r: TgChannel) => {
     if (!confirm(`Удалить канал "${r.channelName}"?`)) return;
     try {
-      await fetchJSON(API.remove(r.id), { method: "DELETE" });
+      await api.del(`/tg/channels/${r.id}`);
+
       await load();
     } catch (e) {
       console.error("delete:", e);
@@ -158,11 +136,8 @@ const TelegramChannelsPage: React.FC = () => {
   const toggleActive = async (r: TgChannel) => {
     try {
       const next: TgChannel = { ...r, active: !r.active };
-      await fetchJSON(API.update(r.id), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toApiPayload(next)),
-      });
+      await api.put(`/tg/channels/${r.id}`, toApiPayload(next));
+
       setRows((prev) => prev.map((x) => (x.id === r.id ? next : x)));
     } catch {
       alert("Не удалось изменить статус");
