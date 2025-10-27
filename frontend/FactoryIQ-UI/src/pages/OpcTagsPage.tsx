@@ -4,7 +4,7 @@ import BackButton from "../components/BackButton";
 import { CheckCircle, AlertTriangle, XCircle } from "lucide-react";
 import { useApi } from "../shared/useApi";
 
-const api = useApi();
+
 
 type PollingInterval = {
   id: number;
@@ -68,6 +68,7 @@ const OpcTagsPage: React.FC = () => {
   const [selectedIntervalId, setSelectedIntervalId] = useState<number>(1);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const api = useApi();
   // Загрузка серверов и интервалов при инициализации
   useEffect(() => {
     api.get<OpcServer[]>("/servers/servers").then((data) => {

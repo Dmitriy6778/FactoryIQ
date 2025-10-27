@@ -1,16 +1,12 @@
 // client/src/components/Auth/PermissionGuard.tsx
 import React from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 
 type GuardProps = {
-    /** Достаточно хотя бы одного разрешения */
     anyOf?: string[];
-    /** Нужны все перечисленные разрешения */
     allOf?: string[];
-    /** Куда редиректить при отсутствии прав (если не указан — покажем 403-блок) */
     redirectTo?: string;
-    /** Что показывать, пока авторизация определяется */
     fallback?: React.ReactNode;
     children: React.ReactNode;
 };
@@ -21,10 +17,6 @@ function checkPerms(has: (p: string) => boolean, anyOf?: string[], allOf?: strin
     return okAny && okAll;
 }
 
-/**
- * ProtectedRoute — используем внутри <Route element={...}>, чтобы
- * не пускать незалогиненных и/или без прав на страницу.
- */
 export const ProtectedRoute: React.FC<GuardProps> = ({
     anyOf,
     allOf,
@@ -32,25 +24,42 @@ export const ProtectedRoute: React.FC<GuardProps> = ({
     fallback = null,
     children,
 }) => {
-    const { isAuthenticated, loading, hasPerm } = useAuth();
+    const { isAuthenticated, loading, hasPerm, logout } = useAuth();
     const location = useLocation();
+    const navigate = useNavigate();
 
     if (loading) return <>{fallback}</>;
 
     if (!isAuthenticated) {
-        // редиректим на /login и сохраняем "откуда пришёл" — чтобы вернуться после входа
         return <Navigate to="/login" replace state={{ from: location.pathname }} />;
     }
 
     const allowed = checkPerms(hasPerm, anyOf, allOf);
     if (!allowed) {
         if (redirectTo) return <Navigate to={redirectTo} replace />;
-        // дефолтный компактный 403
         return (
             <div style={{ padding: 24 }}>
                 <h3 style={{ margin: 0 }}>403 • Недостаточно прав</h3>
                 <div style={{ opacity: 0.7, marginTop: 6, fontSize: 14 }}>
                     Обратитесь к администратору для выдачи доступа.
+                </div>
+                <div style={{ marginTop: 16 }}>
+                    <button
+                        onClick={() => {
+                            logout();
+                            navigate("/login", { replace: true });
+                        }}
+                        style={{
+                            height: 36,
+                            padding: "0 14px",
+                            borderRadius: 8,
+                            border: "1px solid #ddd",
+                            cursor: "pointer",
+                            background: "#fff",
+                        }}
+                    >
+                        Сменить пользователя
+                    </button>
                 </div>
             </div>
         );
@@ -59,11 +68,6 @@ export const ProtectedRoute: React.FC<GuardProps> = ({
     return <>{children}</>;
 };
 
-/**
- * PermissionGuard — обёртка для кусочков UI (кнопки/панели),
- * скрывает содержимое, если прав нет.
- * По умолчанию просто ничего не рендерит; можно передать fallback.
- */
 export const PermissionGuard: React.FC<GuardProps> = ({
     anyOf,
     allOf,

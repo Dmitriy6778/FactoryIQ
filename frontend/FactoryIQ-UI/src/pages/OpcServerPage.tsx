@@ -13,7 +13,6 @@ import { Tree } from "antd";
 import { useApi } from "../shared/useApi";
 
 const API_BASE = ((import.meta as any).env?.VITE_API_BASE || "") as string;
-const api = useApi();
 
 type TreeNode = {
   title: string;
@@ -75,6 +74,8 @@ const OpcServerPage: React.FC = () => {
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
   const [isScanningFullTree, setIsScanningFullTree] = useState(false);
   const [showAddPanel, setShowAddPanel] = useState(false);
+
+  const api = useApi();
 
   // --- Tree загрузка/подгрузка ---
   useEffect(() => {

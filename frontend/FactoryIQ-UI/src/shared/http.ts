@@ -1,7 +1,17 @@
 // client/src/shared/http.ts
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || "";
+function inferApiBase(): string {
+    const envBase = (import.meta as any).env?.VITE_API_BASE?.trim();
+    if (envBase) return envBase;
+    if (typeof window !== "undefined") {
+        // dev-эвристика: если запущено с Vite на 5173 — считаем API на 8000
+        if (window.location.port === "5173") return "http://localhost:8000";
+    }
+    return ""; // как было — относительные пути (например, /api за прокси)
+}
+
+const API_BASE = inferApiBase();
 
 function joinUrl(base: string, path: string) {
     if (!base) return path;
@@ -40,7 +50,7 @@ export async function http<T = any>(
 
     if (!res.ok) {
         let detail: any = undefined;
-        try { detail = await res.json(); } catch { /* ignore */ }
+        try { detail = await res.json(); } catch { }
         const err = new Error(`HTTP ${res.status}`);
         (err as any).status = res.status;
         (err as any).detail = detail;
