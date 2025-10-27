@@ -14,7 +14,7 @@ import TelegramChannelsPage from "./pages/TelegramChannelsPage";
 
 import LoginPage from "./components/Auth/LoginPage";
 import { ProtectedRoute } from "./components/Auth/PermissionGuard";
-
+import UsersAdminPage from "./pages/UsersAdminPage";
 
 import SetupWizard from "./components/Auth/SetupWizard";
 
@@ -24,6 +24,7 @@ const App: React.FC = () => (
     {/* ----------- Публичные маршруты ----------- */}
     <Route path="/setup" element={<SetupWizard />} />
     <Route path="/login" element={<LoginPage />} />
+    <Route path="/settings/users" element={<UsersAdminPage />} />
     {/* <Route path="/setup" element={<SetupWizard />} /> */}
 
     {/* ----------- Защищённые маршруты ----------- */}

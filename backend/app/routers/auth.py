@@ -392,3 +392,20 @@ def setup_status():
         cur.execute("SELECT COUNT(1) FROM dbo.Users")
         n = int(cur.fetchone()[0] or 0)
     return {"users_count": n, "initialized": n > 0}
+
+# backend/app/routers/auth.py
+@router.get("/users", response_model=List[Dict])
+def list_users(_=Depends(require_permissions(any_of=["Users.Manage"]))):
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT Id, Username, Email, [Role], CreatedAt FROM dbo.Users ORDER BY CreatedAt DESC")
+        rows = cur.fetchall()
+        return [
+            {
+                "id": int(r.Id),
+                "username": r.Username,
+                "email": r.Email,
+                "role": r.Role,
+                "created_at": r.CreatedAt.isoformat() if r.CreatedAt else None,
+            }
+            for r in rows
+        ]

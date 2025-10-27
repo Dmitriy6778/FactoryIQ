@@ -10,6 +10,7 @@ import {
   ActivitySquare,
   BarChart2,
   FileText,
+  UserCog,     // 🔐 Новая иконка
 } from "lucide-react";
 
 const StartPage: React.FC = () => {
@@ -68,22 +69,31 @@ const StartPage: React.FC = () => {
 
             <button
               className={`btn ${styles.fullBtn}`}
-              onClick={() => navigate("/settings")}
-            >
-              <Settings size={22} /> Настройки системы
-            </button>
-
-            <button
-              className={`btn ${styles.fullBtn}`}
               onClick={() => navigate("/tg-reports")}
             >
               <FileText size={22} /> Созданные отчёты TELEGRAM
             </button>
+
             <button
               className={`btn ${styles.fullBtn}`}
               onClick={() => navigate("/tg-channels")}
             >
               <FileText size={22} /> Телеграм-каналы
+            </button>
+
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/settings")}
+            >
+              <Settings size={22} /> Настройки системы
+            </button>
+
+            {/* 🔐 Новый модуль */}
+            <button
+              className={`btn ${styles.fullBtn} ${styles.adminBtn}`}
+              onClick={() => navigate("/settings/users")}
+            >
+              <UserCog size={22} /> Пользователи и права
             </button>
           </div>
         </div>
