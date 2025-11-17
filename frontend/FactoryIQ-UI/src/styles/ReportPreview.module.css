@@ -1,0 +1,11 @@
+/* src/components/ReportPreview.module.css */
+.center { display:flex; align-items:center; justify-content:center; min-height:120px; }
+.imgBox { width:100%; display:flex; justify-content:center; }
+.imgBox img { max-width:100%; height:auto; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+.textBox { background:#fff; border:1px solid #eee; border-radius:8px; padding:12px; line-height:1.35; overflow:auto; }
+.textPre {
+  white-space: pre-wrap; /* сохраняет множественные пробелы и переносы */
+  margin: 0;
+  font-family: inherit; /* чтобы не было моноширинного вида, если не хотите */
+  line-height: 1.35;
+}

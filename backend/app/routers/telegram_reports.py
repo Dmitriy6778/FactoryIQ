@@ -1,38 +1,31 @@
 # backend/app/routers/telegram_reports.py
 # Модуль для работы с отчётами в Telegram: создание, предпросмотр, расписания
-
 from __future__ import annotations
-
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any, Tuple
-from collections import defaultdict
-from datetime import datetime, date, timedelta
-
-import io
-import base64
-
-import matplotlib
-matplotlib.use("Agg")  # важно: выбрать backend ДО импорта pyplot
-import matplotlib.pyplot as plt
-
-import numpy as np
-import pandas as pd
-import pyodbc
-
-from ..config import get_conn_str
+from fastapi import APIRouter, HTTPException, Body
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Tuple, Union
 import json
-from .report_styles import ChartStyle, TableStyle, ExcelStyle  # модели стиля
+# ВАЖНО: backend для matplotlib нужно выбирать ДО pyplot
+import matplotlib
+matplotlib.use("Agg")
+import pyodbc
+from ..config import get_conn_str, get_env
+# вверху файла
+from .telegram_simple import (
+    _exec_proc as _exec_proc_simple,
+    _build_series as _build_series_simple,
+    _render_line as _render_line_simple,
+    _render_bar as _render_bar_simple,
+    _make_text_table as _make_text_table_simple,
+)
+from datetime import datetime, timedelta
+from .telegram_simple import preview as _preview2, PreviewIn as _PreviewIn
 
-# >>> Шрифты
-from .fonts_loader import ensure_fonts_ready, pick_font_family, apply_matplotlib_font
-from .fonts_loader import resolve_font
-print(resolve_font("Roboto Condensed"))  # -> ('Roboto Condensed', '/.../RobotoCondensed-Regular.ttf')
+import base64
+import requests
+from .telegram_simple import _soft_normalize as _soft_norm
 
-from matplotlib.font_manager import FontProperties
-import matplotlib as mpl
-from matplotlib.colors import is_color_like
-# <<< Шрифты
+TG_TOKEN = get_env("TG_TOKEN", "")
 
 # --------------------------------------------------------------------------------------
 # Router
@@ -57,15 +50,6 @@ class ChannelUpdate(ChannelCreate):
     id: int
 
 
-class PreviewRequest(BaseModel):
-    template_id: int
-    format: str  # "file" | "table" | "chart" | "text"
-    period_type: str
-    time_of_day: Optional[str] = None
-    aggregation_type: Optional[str] = None
-    style_override: Optional[dict] = None  # <- разовый стиль из модалки
-
-
 class ReportScheduleCreate(BaseModel):
     template_id: int
     period_type: str
@@ -76,50 +60,79 @@ class ReportScheduleCreate(BaseModel):
     send_format: Optional[str] = None
 
 
-class ReportTaskCreate(BaseModel):
+class ReportTaskBase(BaseModel):
+    template_id: int = Field(..., alias="template_id")
+    period_type: str = Field(..., alias="period_type")  # every_5m|every_10m|every_30m|hourly|shift|daily|weekly|monthly|once
+    time_of_day: Optional[str] = Field(None, alias="time_of_day")  # "HH:MM:SS" или None
+    target_type: str = Field("telegram", alias="target_type")
+    target_value: Union[str, int] = Field(..., alias="target_value")
+    aggregation_type: Optional[str] = Field(None, alias="aggregation_type")  # "avg|min|max" или None
+    send_format: Optional[str] = Field("chart", alias="send_format")         # chart|table|file|text
+    window_minutes: Optional[int] = Field(None, alias="window_minutes")      # для every_*m
+    avg_seconds: Optional[int] = Field(None, alias="avg_seconds")            # для every_*m
+    style_id: Optional[int] = Field(None, alias="style_id")
+    style_override: Optional[Union[str, Dict[str, Any]]] = Field(None, alias="style_override")
+
+class ReportTaskCreate(ReportTaskBase):
+    pass
+
+class ReportTaskUpdate(ReportTaskBase):
+    pass
+
+# --- входная модель send (расширена стилями) ---
+class SendIn(BaseModel):
     template_id: int
+    format: str                   # chart|table|text|file
     period_type: str
-    time_of_day: str
-    target_type: str
-    target_value: str
+    time_of_day: Optional[str] = None
     aggregation_type: Optional[str] = None
-    send_format: Optional[str] = None
+    window_minutes: Optional[int] = None
+    avg_seconds: Optional[int] = None
+    target_type: str = "telegram"
+    target_value: Any
+
+    # style overrides (пробрасываем в preview)
+    text_template: Optional[str] = None
+    chart_title: Optional[str] = None
+    chart_kind: Optional[str] = None
+    expand_weekly_shifts: Optional[bool] = None
+
+# ---- Формат текстовой таблицы и sampling ----
+class TextFormat(BaseModel):
+    columns: Optional[List[str]] = None
+    rename: Optional[Dict[str, str]] = None
+    enabled: Optional[Dict[str, bool]] = None
+    show_header: bool = True
+    delimiter: str = " | "
+    number_precision: int = 1
+    thousand_sep: str = " "
+    decimal_sep: str = ","
+    date_format: str = "%Y-%m-%d %H:%M:%S"
+    title: Optional[str] = None
 
 
-class ReportTaskUpdate(ReportTaskCreate):
-    id: int
+class SamplingCfg(BaseModel):
+    mode: Optional[str] = None            # "last_per_step"
+    step_minutes: Optional[int] = None    # 1/2/5/10...
+
 
 
 # --------------------------------------------------------------------------------------
 # Утилиты БД/дат
 # --------------------------------------------------------------------------------------
 def _db() -> pyodbc.Connection:
-    """Подключение к БД с автокоммитом выключенным (используем вручную)."""
+    """Подключение к БД (autocommit выключен)."""
     return pyodbc.connect(get_conn_str())
+
+
+def _window_by_period(p: Optional[str]) -> Optional[int]:
+    return 5 if p == "every_5m" else 10 if p == "every_10m" else 30 if p == "every_30m" else None
 
 
 def _rows_to_dicts(cursor: pyodbc.Cursor) -> Tuple[List[str], List[Dict[str, Any]]]:
     cols = [col[0] for col in cursor.description]
     data = [dict(zip(cols, row)) for row in cursor.fetchall()]
     return cols, data
-
-
-def _as_date_str(v: Any) -> str:
-    if isinstance(v, datetime):
-        return v.date().isoformat()
-    if isinstance(v, date):
-        return v.isoformat()
-    s = str(v or "")
-    return s[:10]
-
-
-def _fmt_tons(v: Any) -> str:
-    try:
-        f = float(v or 0.0)
-    except Exception:
-        f = 0.0
-    return f"{f:,.1f}".replace(",", " ")
-
 
 # --------------------------------------------------------------------------------------
 # Каналы Telegram
@@ -192,19 +205,15 @@ def update_channel(id: int, channel: ChannelUpdate):
 @router.delete("/channels/{id}")
 def delete_channel(id: int):
     """
-    Физическое удаление канала из TelegramReportTarget.
-    Если есть ссылки из ReportSchedule.TargetValue на этот канал —
-    либо запретить удаление (вернуть 409), либо предварительно очистить ссылки.
-    Ниже — вариант «запретить, если используется».
+    Физическое удаление канала. Блокируем удаление, если используется в расписаниях.
     """
     try:
         with _db() as conn:
             cur = conn.cursor()
 
-            # Проверим, используется ли канал в заданиях (TargetType='telegram' и TargetValue=Id канала)
             cur.execute("""
-                SELECT COUNT(*) 
-                FROM ReportSchedule 
+                SELECT COUNT(*)
+                FROM ReportSchedule
                 WHERE TargetType = 'telegram' AND TRY_CAST(TargetValue AS INT) = ?
             """, id)
             in_use = cur.fetchone()[0] or 0
@@ -231,973 +240,236 @@ def delete_channel(id: int):
 def get_tag_ids_for_template(template_id: int, *, as_list: bool = False):
     with _db() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT TagId FROM ReportTemplateTags WHERE TemplateId=?
-        """, template_id)
+        cur.execute("SELECT TagId FROM ReportTemplateTags WHERE TemplateId=?", template_id)
         ids = [row[0] for row in cur.fetchall()]
         return ids if as_list else (",".join(str(x) for x in ids) if ids else None)
 
 
-def compute_preview_period(period_type: str, time_of_day: Optional[str] = None
-                           ) -> Tuple[str, str, str]:
-    """Возвращает (date_from, date_to, group_type)."""
-    now = datetime.now()
-    if period_type in ("once", "hourly"):
-        dt_to = now.replace(minute=0, second=0, microsecond=0)
-        dt_from = dt_to - timedelta(hours=1)
-        return (dt_from.strftime("%Y-%m-%d %H:%M:%S"),
-                dt_to.strftime("%Y-%m-%d %H:%M:%S"),
-                "hour")
-    if period_type in ("day", "daily"):
-        return now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), "day"
-    if period_type == "shift":
-        return now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), "shift"
-    # fallback
-    return now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), "hour"
+# === Helpers ===
 
 
-def get_balance_proc_and_period(period_type: str) -> Tuple[str, str, str]:
-    now = datetime.now()
-    if period_type == "shift":
-        return "sp_Telegram_BalanceReport_Shift", now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
-    if period_type in ("day", "daily"):
-        return "sp_Telegram_BalanceReport_Daily", now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
-    if period_type == "weekly":
-        date_to = (now - timedelta(days=now.weekday() + 1)).strftime("%Y-%m-%d")
-        date_from = (datetime.strptime(date_to, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
-        return "sp_Telegram_BalanceReport_Weekly", date_from, date_to
-    if period_type == "monthly":
-        first_day_this_month = now.replace(day=1)
-        last_day_last_month = first_day_this_month - timedelta(days=1)
-        return ("sp_Telegram_BalanceReport_Monthly",
-                last_day_last_month.replace(day=1).strftime("%Y-%m-%d"),
-                last_day_last_month.strftime("%Y-%m-%d"))
-    # fallback
-    return "sp_Telegram_BalanceReport_Daily", now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
-
-
-# --------------------------------------------------------------------------------------
-# Текстовая «моно» таблица для Telegram (фолбэк)
-# --------------------------------------------------------------------------------------
-def make_telegram_table(columns: List[str], rows: List[Dict[str, Any]]) -> str:
-    """
-    Группировка по дате → внутри список «Продукт | Выход, т».
-    Итоги убраны. Таблица моноширинная.
-    """
-    if not rows:
-        return "Нет данных для предпросмотра"
-
-    sample = rows[0]
-    date_key = "Date" if "Date" in sample else ("Период" if "Период" in sample else None)
-    shift_key = "Смена" if "Смена" in sample else None
-    product_key = "TagName" if "TagName" in sample else None
-    value_key = ("Выход, т" if "Выход, т" in sample else
-                 ("Прирост" if "Прирост" in sample else
-                  ("Value" if "Value" in sample else None)))
-
-    if not date_key or not product_key or not value_key:
-        header = " | ".join(columns)
-        body = "\n".join(" | ".join(str(r.get(c, "")) for c in columns) for r in rows)
-        return "Предпросмотр отчёта\n" + header + "\n" + "-" * len(header) + "\n" + body
-
-    groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for r in rows:
-        groups[_as_date_str(r.get(date_key))].append(r)
-
-    out = ["Предпросмотр отчёта", ""]
-    for d in sorted(groups.keys()):
-        rows_d = groups[d]
-
-        shift_label = None
-        if shift_key:
-            uniq = {str(r.get(shift_key) or "") for r in rows_d if r.get(shift_key)}
-            if len(uniq) == 1:
-                only = next(iter(uniq))
-                if only and only != "Сутки":
-                    shift_label = only
-
-        out.append(f"Дата: {d}" + (f" — Смена: {shift_label}" if shift_label else ""))
-
-        head_l, head_r = "Продукт", "Выход, т"
-        prod_vals = [str(r.get(product_key) or "") for r in rows_d]
-        val_vals = [_fmt_tons(r.get(value_key)) for r in rows_d]
-        w_prod = max(len(head_l), *(len(s) for s in prod_vals)) if prod_vals else len(head_l)
-        w_val = max(len(head_r), *(len(s) for s in val_vals)) if val_vals else len(head_r)
-
-        out.append("─" * w_prod + " " + "─" * (w_val + 2))
-        out.append(f"{head_l.ljust(w_prod)} | {head_r.rjust(w_val)}")
-        out.append("─" * w_prod + " " + "─" * (w_val + 2))
-
-        for p, v in zip(prod_vals, val_vals):
-            out.append(f"{p.ljust(w_prod)} | {v.rjust(w_val)}")
-
-        out.append("")
-
-    return "\n".join(out).rstrip()
-
-
-# --------------------------------------------------------------------------------------
-# Генерация PNG‑графика
-# --------------------------------------------------------------------------------------
-
-def _clean_color(c):
-    """Вернёт валидный цвет (строку) либо None."""
-    if not c:
+def _parse_tod(tod: Optional[str]):
+    if not tod:
         return None
-    if isinstance(c, str):
-        s = c.strip()
-        return s if is_color_like(s) else None
-    return None
-
-def generate_bar_chart_png(series: List[Dict[str, Any]], title: str, style: Dict[str, Any] | None = None) -> Optional[str]:
-    if not series:
+    try:
+        hh, mm, ss = (tod.split(":") + ["0", "0"])[:3]
+        return int(hh), int(mm), int(ss)
+    except Exception:
         return None
 
-    style = style or {}
-
-    # ---------- ШРИФТ ----------
-    chart_font = pick_font_family(style.get("fontFamily") or style.get("_tableFont"))
-    mpl.rcParams["font.family"] = chart_font
-
-    # ---------- SIZE / DPI ----------
-    try:
-        dpi = int(float(style.get("dpi", 140) or 140))
-    except Exception:
-        dpi = 140
-    size = style.get("size") or {"w": 1280, "h": 600}
-    try:
-        w_px = int(float(size.get("w", 1280) or 1280))
-        h_px = int(float(size.get("h", 600) or 600))
-    except Exception:
-        w_px, h_px = 1280, 600
-    W, H = max(1, w_px) / dpi, max(1, h_px) / dpi
-
-    # ---------- Утилиты цветов ----------
-    from matplotlib.colors import is_color_like
-
-    def _to_color(val, default="#FFFFFF"):
-        if val is None:
-            return default
-        if isinstance(val, dict):
-            if "color" in val:
-                return _to_color(val["color"], default)
-            for k in ("value", "hex", "bg", "fg"):
-                if k in val:
-                    return _to_color(val[k], default)
-            return default
-        if isinstance(val, (list, tuple)):
-            if len(val) in (3, 4):
-                try:
-                    return tuple(float(x) for x in val)
-                except Exception:
-                    return default
-            return default
-        if isinstance(val, str):
-            s = val.strip()
-            return s if is_color_like(s) else default
-        return default
-
-    def _clean_colors(seq, fallback):
-        out = []
-        if isinstance(seq, (list, tuple)):
-            for c in seq:
-                cc = _to_color(c, None)
-                if cc is not None and is_color_like(cc):
-                    out.append(cc)
-        return out if out else fallback[:]
-
-    # ---------- Фигура / оси ----------
-    fig, ax = plt.subplots(figsize=(W, H), dpi=dpi)
-
-    pal = style.get("palette") or {}
-    mode = (pal.get("type") or "single-or-multi").strip()
-    single_color = _to_color(pal.get("singleColor"), "#2176C1")
-    default_multi = ["#2176C1","#FFB100","#FF6363","#7FDBB6","#6E44FF",
-                     "#F25F5C","#007F5C","#F49D37","#A259F7","#3A86FF",
-                     "#FF5C8A","#FFC43D"]
-    multi = _clean_colors(pal.get("multi"), default_multi)
-
-    # Фон
-    bg = _to_color((style.get("background") or {}).get("color"), "#FFFFFF")
-    fig.patch.set_facecolor(bg)
-    ax.set_facecolor(bg)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    # ---------- Оси / подписи ----------
-    axes = style.get("axes") or {}
-    x_cfg = axes.get("x") or {}
-    y_cfg = axes.get("y") or {}
-
-    def _int(v, d):
-        try:
-            return int(float(v if v is not None else d))
-        except Exception:
-            return d
-
-    rot    = _int(x_cfg.get("rotation", 30), 30)
-    x_tick = _int(x_cfg.get("tickFont", 10), 10)
-    wrap   = _int(x_cfg.get("wrap", 13), 13)
-    y_tick = _int(y_cfg.get("tickFont", 10), 10)
-
-    y_grid  = bool(y_cfg.get("grid", True))
-    y_label = y_cfg.get("label") or "Всего, т"
-
-    # единица измерения из подписи оси Y ("Всего, т" → "т")
-    y_unit = None
-    if isinstance(y_label, str) and "," in y_label:
-        tail = y_label.split(",", 1)[1].strip()
-        if tail:
-            y_unit = tail
-
-    layout = style.get("layout") or {}
-    title_cfg  = layout.get("title")  or {"show": True, "upper": True, "fontSize": 18, "align": "center"}
-    legend_cfg = layout.get("legend") or {"show": True, "position": "bottom"}
-
-    # перенос подписей X
-    def _wrap_text(text: str, max_len: int = 13) -> str:
-        words = str(text).split()
-        lines, line = [], ""
-        for w in words:
-            trial = (line + " " + w).strip()
-            if len(trial) <= max_len:
-                line = trial
-            else:
-                if line:
-                    lines.append(line)
-                line = w
-        if line:
-            lines.append(line)
-        return "\n".join(lines)
-
-    # ---------- Подготовка данных ----------
-    x_domain: List[str] = []
-    for s in series:
-        for pt in s.get("data", []):
-            lab = _wrap_text(str(pt["x"]), wrap)
-            if lab not in x_domain:
-                x_domain.append(lab)
-
-    ser_names: List[str] = []
-    ser_values: List[List[float]] = []
-    for idx, s in enumerate(series):
-        base_label = s.get("description") or s.get("label") or s.get("tag") or f"Серия {idx+1}"
-        unit = s.get("unit") or y_unit
-        label = f"{base_label}, {unit}" if unit else str(base_label)
-        ser_names.append(label)
-
-        m = {_wrap_text(str(pt["x"]), wrap): float(pt["y"]) for pt in s.get("data", [])}
-        vals = [m.get(xlab, 0.0) for xlab in x_domain]
-        ser_values.append(vals)
-
-    n_series = max(1, len(ser_names))
-    x = np.arange(len(x_domain))
-
-    # ---------- Ширина и зазор ----------
-    bars_cfg = style.get("bars") or {}
-
-    # ширина категории (доля от шага по X; можно задавать 0.2..1.5 или процентами >3)
-    try:
-        raw_width = float(bars_cfg.get("width", 0.9) or 0.9)
-    except Exception:
-        raw_width = 0.9
-    cat_width = raw_width / 100.0 if raw_width > 3 else raw_width
-    cat_width = min(1.5, max(0.2, cat_width))
-
-    # внутренний зазор между столбиками одной категории (доля от ширины категории)
-    try:
-        gap_ratio = float(bars_cfg.get("gap", 0.10) or 0.10)
-    except Exception:
-        gap_ratio = 0.10
-    gap_ratio = min(0.5, max(0.0, gap_ratio))
-
-    if n_series == 1:
-        barw = cat_width
-        offsets = [0.0]
-    else:
-        # общий «зазор» = gap_px * (n_series - 1)
-        gap_px = cat_width * gap_ratio / max(1, n_series)  # скейлим к числу серий
-        usable = max(0.05, cat_width - gap_px * (n_series - 1))
-        barw = max(0.01, usable / n_series)
-
-        # центры баров внутри категории
-        start = -cat_width / 2 + barw / 2
-        offsets = [start + i * (barw + gap_px) for i in range(n_series)]
-
-    # ---------- Цвета ----------
-    if mode == "single":
-        colors = [single_color for _ in range(n_series)]
-    elif mode == "single-or-multi" and n_series <= 1:
-        colors = [single_color]
-    else:
-        colors = [multi[i % len(multi)] for i in range(n_series)]
-
-    # ---------- Рендер ----------
-    rects_all = []
-    for i in range(n_series):
-        rects = ax.bar(x + offsets[i], ser_values[i], barw, label=ser_names[i], color=colors[i])
-        rects_all.append(rects)
-
-    # значения внутри
-    if bars_cfg.get("showValueInside", True):
-        try:
-            prec = int(float(bars_cfg.get("valuePrecision", 1) or 1))
-        except Exception:
-            prec = 1
-        for rects in rects_all:
-            for r in rects:
-                h = r.get_height()
-                if h:
-                    ax.text(r.get_x() + r.get_width() / 2, h * 0.5, f"{h:.{prec}f}",
-                            ha="center", va="center", fontsize=10, color="white", fontweight="bold")
-
-    # оси/сетка
-    ax.set_xticks(x)
-    ax.set_xticklabels(x_domain, fontsize=x_tick, rotation=rot, ha="right", linespacing=1.2, fontweight="bold")
-    ax.tick_params(axis='y', labelsize=y_tick)
-    ax.set_ylabel(y_label)
-    if y_grid:
-        ax.yaxis.grid(True, linestyle="--", alpha=0.25)
-    if (axes.get("x") or {}).get("grid", False):
-        ax.xaxis.grid(True, linestyle="--", alpha=0.25)
-
-    # фиксируем X-пределы, чтобы ширина и зазоры были видимы даже при 1 категории
-    ax.set_xlim(-0.5, len(x_domain) - 0.5)
-
-    # легенда
-    if legend_cfg.get("show", True):
-        loc = {
-            "top": "upper center",
-            "bottom": "lower center",
-            "left": "center left",
-            "right": "center right",
-        }.get(legend_cfg.get("position", "bottom"), "lower center")
-        ax.legend(loc=loc, ncols=max(1, min(3, n_series)), frameon=False)
-
-    # заголовок
-    if title_cfg.get("show", True):
-        t = title.upper() if title_cfg.get("upper", True) else title
-        align = {"left": "left", "center": "center", "right": "right"}.get(title_cfg.get("align", "center"), "center")
-        ax.set_title(t, fontsize=int(title_cfg.get("fontSize", 18)), loc=align)
-
-    # вывод
-    buf = io.BytesIO()
-    plt.tight_layout()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
-
-
-  
-
-def _ha(v: str) -> str:
-    return {"left": "left", "center": "center", "right": "right"}.get((v or "left").lower(), "left")
-
-
-def _fmt_num(v: Any, prec: int, th: str, dec: str) -> str:
-    try:
-        f = float(v)
-    except Exception:
-        return "-"
-    s = f"{f:,.{prec}f}"
-    return s.replace(",", "X").replace(".", dec).replace("X", th)
-
-def load_style_for_template(cur, template_id: int, override: dict | None = None) -> dict:
-    """
-    1) Берём StyleId из ReportTemplates.
-    2) Если есть — читаем json стиля из ReportStyles.
-    3) Если нет — дефолты.
-    4) Поверх — глубокий merge override (если пришёл).
-    """
-    cur.execute("SELECT StyleId FROM ReportTemplates WHERE Id=?", template_id)
-    row = cur.fetchone()
-
-    if row and getattr(row, "StyleId", None):
-        style_id = row.StyleId
-        cur.execute("SELECT ChartStyle, TableStyle, ExcelStyle FROM ReportStyles WHERE Id=?", style_id)
-        s = cur.fetchone()
-        base = {
-            "chart": (json.loads(s.ChartStyle) if s and s.ChartStyle else ChartStyle().dict()),
-            "table": (json.loads(s.TableStyle) if s and s.TableStyle else TableStyle().dict()),
-            "excel": (json.loads(getattr(s, "ExcelStyle", None)) if s and getattr(s, "ExcelStyle", None) else ExcelStyle().dict())
-        }
-    else:
-        base = {
-            "chart": ChartStyle().dict(),
-            "table": TableStyle().dict(),
-            "excel": ExcelStyle().dict()
-        }
-
-    if override:
-        for k in ("chart", "table", "excel"):
-            if isinstance(override.get(k), dict):
-                _deep_merge(base[k], override[k])
-
-    return base
-
-
-def generate_table_pngs_for_balance(
-    rows: List[Dict[str, Any]],
-    date_key: str,
-    product_key: str = "TagName",
-    value_key: str = "Выход, тонн",
-    style: Dict[str, Any] | None = None
-) -> List[str]:
-    """
-    Рендерит PNG-таблицы по каждой дате. Возвращает список base64 PNG.
-    Жёстко применяет шрифт через FontProperties(fname=...).
-    """
-    style = (style or {})
-    if not rows:
-        return []
-
-    # --- ШРИФТ
-    fam, fpath = resolve_font(style.get("fontFamily"))
-    mpl.rcParams["font.family"] = fam
-    fp_header_base = FontProperties(fname=fpath) if fpath else FontProperties(family=fam)
-    fp_body_base   = FontProperties(fname=fpath) if fpath else FontProperties(family=fam)
-
-    font_size   = int(style.get("fontSize", 13))
-    density     = (style.get("density") or "compact").lower()
-    dens_scale  = {"compact": 0.85, "normal": 1.0, "comfortable": 1.15}.get(density, 0.85)
-
-    # --- header/body/columns/totals
-    header = style.get("header", {}) or {}
-    head_bg    = _clean_color(header.get("bg"))    or "#F7F9FC"
-    head_color = _clean_color(header.get("color")) or "#0F172A"
-    head_bold  = bool(header.get("bold", True))
-    head_align = _ha(header.get("align", "center"))
-
-    body = style.get("body", {}) or {}
-    zebra      = bool(body.get("zebra", True))
-    zebra_col  = _clean_color(body.get("zebraColor"))  or "#FAFBFC"
-    border_col = _clean_color(body.get("borderColor")) or "#EEF1F6"
-    num_prec   = int(body.get("numberPrecision", 1))
-    thousand   = body.get("thousandSep", " ")
-    decimal    = body.get("decimalSep", ",")
-    body_align = _ha(body.get("align", "left"))
-    align_nums_right = bool(body.get("alignNumbersRight", True))
-    text_color = _clean_color(body.get("color")) or "#0F172A"
-
-    cols_cfg     = style.get("columns", {}) or {}
-    first_w_pct  = int(cols_cfg.get("firstColWidthPct", 68))
-    max_w_px     = int(cols_cfg.get("maxWidthPx", 980))
-    auto_width   = bool(cols_cfg.get("autoWidth", True))
-
-    totals = style.get("totals", {}) or {}
-    show_totals  = bool(totals.get("show", False))
-    totals_label = totals.get("label", "Итого")
-
-    # --- Группировка по дате
-    by_date: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for r in rows:
-        d = r.get(date_key)
-        if hasattr(d, "strftime"):
-            d = d.strftime("%Y-%m-%d")
-        elif isinstance(d, str):
-            d = d[:10]
-        by_date[str(d)].append(r)
-
-    images: List[str] = []
-    for d, items in sorted(by_date.items()):
-        dict_rows = []
-        total_val = 0.0
-        for it in items:
-            val = it.get(value_key)
-            try:
-                f = float(val)
-            except Exception:
-                f = 0.0
-            total_val += f
-            dict_rows.append({
-                "Продукт": str(it.get(product_key, "")),
-                "Выход, т": _fmt_num(f, num_prec, thousand, decimal),
-            })
-
-        if show_totals:
-            dict_rows.append({
-                "Продукт": totals_label,
-                "Выход, т": _fmt_num(total_val, num_prec, thousand, decimal),
-            })
-
-        df = pd.DataFrame(dict_rows)
-        n_rows = len(df)
-
-        # --- размеры фигуры
-        fig_w = min(max_w_px / 150.0, 7.5)
-        base_h = max(1.6, 0.42 * n_rows + 0.8)
-        fig_h = base_h * dens_scale
-
-        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=150)
-        ax.axis("off")
-
-        # --- заголовок
-        ax.text(
-            0.0, 1.04, f"Дата: {d}",
-            fontsize=max(10, int(font_size * 0.9)),
-            fontproperties=fp_body_base,
-            color=text_color,
-            transform=ax.transAxes
-        )
-
-        # --- ширины колонок
-        if auto_width:
-            max_l = max([len(str(x)) for x in df["Продукт"].values] + [7])
-            max_r = max([len(str(x)) for x in df["Выход, т"].values] + [7])
-            sum_lr = max(1, max_l + max_r)
-            cw1 = max(0.4, min(0.85, max_l / sum_lr))
-            cw2 = 1.0 - cw1
-        else:
-            cw1 = max(0.4, min(0.9, first_w_pct / 100.0))
-            cw2 = 1.0 - cw1
-
-        tbl = ax.table(
-            cellText=df.values,
-            colLabels=df.columns,
-            cellLoc="center",
-            colLoc="center",
-            loc="upper left",
-            bbox=[0.0, 0.0, 1.0, 0.92],
-            colWidths=[cw1, cw2],
-        )
-        tbl.auto_set_font_size(False)
-        base_font = max(8, int(font_size * 0.92))
-        tbl.set_fontsize(base_font)
-        tbl.scale(1.0, 0.88 if density == "compact" else (1.0 if density == "normal" else 1.12))
-
-        # --- подготавливаем свойства шрифта с актуальным размером
-        fp_header = fp_header_base.copy()
-        fp_header.set_size(base_font)
-        if head_bold:
-            fp_header.set_weight("bold")
-
-        fp_body = fp_body_base.copy()
-        fp_body.set_size(base_font)
-
-        # --- стиль ячеек
-        for (ri, ci), cell in tbl.get_celld().items():
-            cell.set_edgecolor(border_col)
-            text = cell.get_text()
-            if ri == 0:
-                cell.set_facecolor(head_bg)
-                text.set_color(head_color)
-                text.set_fontproperties(fp_header)
-                text.set_ha(head_align)
-            else:
-                text.set_color(text_color)
-                text.set_fontproperties(fp_body)
-                if zebra and ri % 2 == 1:
-                    cell.set_facecolor(zebra_col)
-                # выравнивание текста
-                if ci == 0:
-                    text.set_ha(body_align)
-                else:
-                    text.set_ha("right" if align_nums_right else body_align)
-
-        # --- вывод
-        buf = io.BytesIO()
-        plt.tight_layout(pad=0.2)
-        fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white")
-        plt.close(fig)
-        buf.seek(0)
-        images.append(base64.b64encode(buf.read()).decode("utf-8"))
-
-    return images
-
-
-
-def _deep_merge(dst: dict, src: dict) -> dict:
-    for k, v in (src or {}).items():
-        if isinstance(v, dict) and isinstance(dst.get(k), dict):
-            _deep_merge(dst[k], v)
-        else:
-            dst[k] = v
-    return dst
-
-
-def load_style_for_template(cur, template_id: int, override: dict | None = None) -> dict:
-    cur.execute("SELECT StyleId FROM ReportTemplates WHERE Id=?", template_id)
-    row = cur.fetchone()
-    base = None
-    if row and getattr(row, "StyleId", None):
-        cur.execute("SELECT ChartStyle, TableStyle, ExcelStyle FROM ReportStyles WHERE Id=?", row.StyleId)
-        s = cur.fetchone()
-        base = {
-            "chart": (json.loads(s.ChartStyle) if s and s.ChartStyle else ChartStyle().dict()),
-            "table": (json.loads(s.TableStyle) if s and s.TableStyle else TableStyle().dict()),
-            "excel": (json.loads(getattr(s, "ExcelStyle", None)) if s and getattr(s, "ExcelStyle", None) else ExcelStyle().dict())
-        }
-    if not base:
-        base = {"chart": ChartStyle().dict(), "table": TableStyle().dict(), "excel": ExcelStyle().dict()}
-
-    if override:
-        for k in ("chart", "table", "excel"):
-            if isinstance(override.get(k), dict):
-                _deep_merge(base[k], override[k])
-
-    return base
-
-
-# --------------------------------------------------------------------------------------
-# Предпросмотр отчёта
-# --------------------------------------------------------------------------------------
-@router.post("/preview")
-def preview_report(payload: PreviewRequest):
-    try:
-        # 0) Подготовим шрифты (одноразовая регистрация на процесс)
-        ensure_fonts_ready()
-
-        table_pngs: Optional[List[str]] = None
-        with _db() as conn:
-            cur = conn.cursor()
-
-            # 1) Тип отчёта и имя шаблона
-            cur.execute("SELECT ReportType, Name FROM ReportTemplates WHERE Id=?", payload.template_id)
-            row = cur.fetchone()
-            if not row:
-                return {"ok": False, "detail": "Не найден шаблон отчёта."}
-            report_type = row.ReportType or "custom"
-            template_name = row.Name or "Предпросмотр отчёта"
-
-            # 1.1) Стили + глобальный шрифт (важно сделать до рендера)
-            styles = load_style_for_template(cur, payload.template_id, payload.style_override)
-            chart_style = styles["chart"].copy()
-            if "fontFamily" not in chart_style and styles.get("table", {}).get("fontFamily"):
-                chart_style["_tableFont"] = styles["table"]["fontFamily"]
-            table_style = styles["table"]
-            excel_style = styles.get("excel", {})
-
-            # Глобально применим семейство: table → chart → дефолт
-            base_font_family = table_style.get("fontFamily") or chart_style.get("fontFamily") or "Roboto Condensed"
-            fam, fpath = resolve_font(base_font_family)
-            apply_matplotlib_font(fam)  # глобально
-            _base_font_props = FontProperties(fname=fpath) if fpath else FontProperties(family=fam)
-
-            # 2) Теги для шаблона
-            if report_type == "balance":
-                tag_ids = get_tag_ids_for_template(payload.template_id, as_list=False)
-            else:
-                tag_ids = get_tag_ids_for_template(payload.template_id, as_list=True)
-            if not tag_ids:
-                return {"ok": False, "detail": "Не выбраны теги для шаблона."}
-
-            # 3) Подписи тегов (будем использовать как description в легенде)
-            cur.execute("""
-                SELECT t.BrowseName, ISNULL(t.Description, t.BrowseName) AS Label
-                FROM OpcTags t
-                WHERE t.Id IN (SELECT TagId FROM ReportTemplateTags WHERE TemplateId = ?)
-            """, payload.template_id)
-            tag_label_map = {r.BrowseName: r.Label for r in cur.fetchall()}
-
-            # 4) Данные отчёта
-            if report_type == "balance":
-                if payload.period_type == "weekly":
-                    now = datetime.now()
-                    this_mon_8 = (now - timedelta(days=now.weekday())).replace(hour=8, minute=0, second=0, microsecond=0)
-                    week_end = this_mon_8.date()
-                    week_start = (this_mon_8 - timedelta(days=7)).date()
-                    proc = "sp_Telegram_BalanceReport_Daily"
-                    cur.execute(f"EXEC {proc} ?, ?, ?", week_start, week_end - timedelta(days=1), tag_ids)
-                    columns, data = _rows_to_dicts(cur)
-                    period = {"date_from": str(week_start), "date_to": str(week_end - timedelta(days=1))}
-                else:
-                    proc, date_from, date_to = get_balance_proc_and_period(payload.period_type)
-                    cur.execute(f"EXEC {proc} ?, ?, ?", date_from, date_to, tag_ids)
-                    columns, data = _rows_to_dicts(cur)
-                    period = {"date_from": date_from, "date_to": date_to}
-            else:
-                date_from, date_to, group_type = compute_preview_period(payload.period_type, payload.time_of_day)
-                agg_list = [a.strip().upper() for a in (payload.aggregation_type or "CURR").split(",") if a.strip()]
-                import json as _json
-                tags_json = _json.dumps([
-                    {"tag_id": int(tid), "aggregates": agg_list, "interval_minutes": 60}
-                    for tid in tag_ids  # type: ignore[arg-type]
-                ])
-                cur.execute("EXEC sp_Telegram_TagValues_MultiAgg ?, ?, ?, ?",
-                            date_from, date_to, tags_json, group_type)
-                columns, data = _rows_to_dicts(cur)
-                period = {"date_from": date_from, "date_to": date_to}
-
-        # 5) Фильтр по смене — только для shift
-        if payload.period_type == "shift" and payload.time_of_day:
-            t5 = payload.time_of_day[:5]
-            shift_no = 1 if t5 == "08:00" else 2 if t5 == "20:00" else None
-            if shift_no is not None:
-                data = [r for r in data if str(r.get("ShiftNo", "")) == str(shift_no)]
-                time_target = datetime.strptime(payload.time_of_day, "%H:%M:%S").time()
-
-                def is_shift_match(row: Dict[str, Any]) -> bool:
-                    start = row.get("Начало") or row.get("Start")
-                    if isinstance(start, datetime):
-                        return start.time().hour == time_target.hour
-                    return True
-
-                data = [r for r in data if is_shift_match(r)]
-
-        # 6) Series для графика (важно: используем description и unit="т", НЕ добавляем 'Value' в легенду)
-        chart_series: List[Dict[str, Any]] = []
-        if report_type == "balance" and payload.period_type == "weekly":
-            # суммируем по дням, переводим в тонны
-            by_date = defaultdict(float)
-            for r in data:
-                dt = r.get("Date") or r.get("Дата")
-                dkey = dt.date() if isinstance(dt, datetime) else datetime.strptime(str(dt), "%Y-%m-%d").date()
-                try:
-                    by_date[dkey] += float(r.get("Прирост") or 0)
-                except Exception:
-                    pass
-
-            now = datetime.now()
-            this_mon_8 = (now - timedelta(days=now.weekday())).replace(hour=8, minute=0, second=0, microsecond=0)
-            ordered_days = [(this_mon_8 - timedelta(days=7) + timedelta(days=i)).date() for i in range(7)]
-            chart_series = [{
-                "tag": "Всего за день",
-                "description": "Всего за день",
-                "unit": "т",
-                "data": [{
-                    "x": f"{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'][d.weekday()]} {d.day:02d}.{d.month:02d}",
-                    "y": (by_date.get(d, 0.0) or 0.0) / 1000.0
-                } for d in ordered_days],
-            }]
-        else:
-            if data:
-                # группируем точки по человеческой метке тега (description)
-                series_dict: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-                for row in data:
-                    tag_name = row.get("TagName")
-                    label = tag_label_map.get(tag_name, tag_name)  # человекочитаемое имя
-                    y_raw = row.get("Прирост") if "Прирост" in row else row.get("Value")
-                    try:
-                        y = float(y_raw) if y_raw is not None else None
-                    except Exception:
-                        y = None
-                    if y is None:
-                        continue
-                    y = y / 1000.0  # в тонны
-                    x = row.get("Date") or row.get("Начало") or row.get("Start") or label
-                    if isinstance(x, datetime):
-                        x = x.strftime("%d.%m %H:%M")
-                    series_dict[str(label)].append({"x": x, "y": y})
-
-                for label, points in series_dict.items():
-                    chart_series.append({
-                        "tag": label,             # на всякий случай оставим
-                        "description": label,     # именно это уйдёт в легенду
-                        "unit": "т",
-                        "data": points
-                    })
-
-        # 7) Форматирование таблиц и PNG-таблицы (балансовые)
-        fmt = (payload.format or "").lower()
-        is_table_or_text = fmt in ("table", "text")
-
-        if is_table_or_text and report_type == "balance" and data:
-            sample = data[0]
-            date_key = "Date" if "Date" in sample else ("Период" if "Период" in sample else None)
-            shift_key = "Смена" if "Смена" in sample else None
-
-            out_cols = [c for c in [date_key, shift_key, "TagName", "Выход, т"] if c]
-            out_rows: List[Dict[str, Any]] = []
-            for r in data:
-                browse = r.get("TagName")
-                label = tag_label_map.get(browse, browse)
-                growth = r.get("Прирост") if "Прирост" in r else r.get("Value")
-                try:
-                    val_t = float(growth or 0) / 1000.0
-                except Exception:
-                    val_t = None
-
-                newr: Dict[str, Any] = {}
-                if date_key:
-                    newr[date_key] = r.get(date_key)
-                if shift_key:
-                    newr["Смена"] = r.get(shift_key)
-                newr["TagName"] = label
-                newr["Выход, т"] = val_t
-                out_rows.append(newr)
-
-            columns = out_cols
-            data = out_rows
-
-            date_key_for_img = "Date" if "Date" in columns else "Период"
-            table_pngs = generate_table_pngs_for_balance(
-                data,
-                date_key=date_key_for_img,
-                product_key="TagName",
-                value_key="Выход, т",
-                style=table_style,
-            )
-
-        # 8) PNG-график
-        chart_png = generate_bar_chart_png(chart_series, title=template_name, style=chart_style) if chart_series else None
-
-        # 9) Обрезаем лишние ключи в данных под текущие columns
-        if columns:
-            data = [{k: row.get(k) for k in columns} for row in data]
-
-        return {
-            "ok": True,
-            "data": data,
-            "columns": columns,
-            "chart_series": chart_series,
-            "chart_png": chart_png,
-            "table_pngs": table_pngs,
-            "text_table": make_telegram_table(columns, data),
-            "period": period,
-            "effective_style": {
-                "chart": chart_style,
-                "table": table_style,
-                "excel": excel_style,
-            },
-        }
-
-    except Exception as ex:
-        import traceback
-        print("Ошибка в preview_report:\n", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Ошибка генерации превью: {ex}")
-
-
-# --------------------------------------------------------------------------------------
-# Расчёт первичного NextRun (для /schedule)
-# --------------------------------------------------------------------------------------
-def compute_initial_nextrun(period_type: str, time_of_day: Optional[str]) -> datetime:
+def compute_initial_nextrun(period_type: str, time_of_day: Optional[str]):
+    from datetime import datetime, timedelta
     now = datetime.now()
-    hh, mm, ss = 8, 0, 0
-    if time_of_day:
-        parts = [int(p) for p in time_of_day.split(":")]
-        if len(parts) == 3:
-            hh, mm, ss = parts
-        elif len(parts) == 2:
-            hh, mm = parts
-            ss = 0
+    pt = (period_type or "").lower()
 
-    if period_type in ("day", "daily"):
-        run = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
-        if run <= now:
-            run += timedelta(days=1)
-    elif period_type == "shift":
-        run = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
-        if run <= now:
-            run += timedelta(hours=12 if hh in (8, 20) else 12)
-    elif period_type == "weekly":
-        target = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
-        days_ahead = (7 - now.weekday()) % 7
-        if days_ahead == 0 and target <= now:
-            days_ahead = 7
-        run = (now + timedelta(days=days_ahead)).replace(hour=hh, minute=mm, second=ss, microsecond=0)
-    elif period_type == "monthly":
-        if now.month == 12:
-            run = now.replace(year=now.year + 1, month=1, day=1, hour=hh, minute=mm, second=ss, microsecond=0)
-        else:
-            run = now.replace(month=now.month + 1, day=1, hour=hh, minute=mm, second=ss, microsecond=0)
-    elif period_type == "hourly":
-        run = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-    elif period_type == "once":
-        run = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
-        if run <= now:
-            run = now
+    if pt in ("every_5m", "every_10m", "every_30m"):
+        wm = _window_by_period(pt) or 5
+        minutes = ((now.minute // wm) + 1) * wm
+        delta_minutes = minutes - now.minute
+        if delta_minutes <= 0:
+            delta_minutes += wm
+        return now.replace(second=0, microsecond=0) + timedelta(minutes=delta_minutes)
+
+    if pt == "hourly":
+        return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+    hhmmss = _parse_tod(time_of_day)
+    if hhmmss:
+        hh, mm, ss = hhmmss
     else:
-        run = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+        hh, mm, ss = 8, 0, 0  # дефолт 08:00
 
-    return run
+    base = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+
+    if pt in ("daily", "shift", "once"):
+        return base if base > now else (base + timedelta(days=1))
+
+    if pt == "weekly":
+        # Тикаем два раза в сутки: в time_of_day и через +12 часов
+        first = base
+        second = base + timedelta(hours=12)
+
+        if now < first:
+            return first
+        if now < second:
+            return second
+        # оба слота прошли — на следующий день в time_of_day
+        return first + timedelta(days=1)
+
+    if pt == "monthly":
+        year = now.year
+        month = now.month
+        cand = base
+        if cand <= now:
+            if month == 12:
+                month = 1
+                year += 1
+            else:
+                month += 1
+            import calendar
+            last_day = calendar.monthrange(year, month)[1]
+            day = min(now.day, last_day)
+            cand = cand.replace(year=year, month=month, day=day)
+        return cand
+
+    return now + timedelta(hours=1)
+
+def _row_to_task_dict(r) -> Dict[str, Any]:
+    # TimeOfDay может прийти как time/datetime/str — нормализуем в "HH:MM:SS"
+    def _fmt_tod(v):
+        try:
+            return v.strftime("%H:%M:%S") if v else None
+        except Exception:
+            return str(v) if v else None
+
+    def _fmt_dt(v):
+        try:
+            return v.isoformat(sep=" ")
+        except Exception:
+            return str(v) if v is not None else None
+
+    return {
+        "id": r.Id,
+        "template_id": r.TemplateId,
+        "period_type": r.PeriodType,
+        "time_of_day": _fmt_tod(getattr(r, "TimeOfDay", None)),
+        "next_run": _fmt_dt(getattr(r, "NextRun", None)),
+        "last_run": _fmt_dt(getattr(r, "LastRun", None)),
+        "active": bool(getattr(r, "Active", 1)),
+        "target_type": getattr(r, "TargetType", None),
+        "target_value": str(getattr(r, "TargetValue", "")) if getattr(r, "TargetValue", None) is not None else None,
+        "aggregation_type": getattr(r, "AggregationType", None),
+        "send_format": getattr(r, "SendFormat", None),
+        "window_minutes": getattr(r, "WindowMinutes", None),
+        "avg_seconds": getattr(r, "AvgSeconds", None),
+        "style_id": getattr(r, "StyleId", None),
+        "style_override": getattr(r, "StyleOverride", None),
+    }
 
 
-# --------------------------------------------------------------------------------------
-# Задачи (grid в UI)
-# --------------------------------------------------------------------------------------
-@router.get("/tasks")
-def get_report_tasks():
+# ======== CRUD для задач расписания (ReportSchedule) ========
+@router.get("/schedule")
+def list_schedules():
     try:
         with _db() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT
-                    rs.Id,
-                    rs.TemplateId,
-                    t.Name as TemplateName,
-                    rs.PeriodType,
-                    rs.TimeOfDay,
-                    rs.NextRun,
-                    rs.LastRun,
-                    rs.Active,
-                    rs.TargetType,
-                    rs.TargetValue,
-                    rs.AggregationType,
-                    rs.SendFormat
-                FROM OpcUaSystem.dbo.ReportSchedule rs
-                LEFT JOIN OpcUaSystem.dbo.ReportTemplates t ON rs.TemplateId = t.Id
-                ORDER BY rs.Id DESC
+                SELECT Id, TemplateId, PeriodType, TimeOfDay,
+                       NextRun, LastRun, Active,
+                       TargetType, TargetValue,
+                       AggregationType, SendFormat,
+                       WindowMinutes, AvgSeconds,
+                       StyleId, StyleOverride
+                FROM ReportSchedule
+                ORDER BY Id DESC
             """)
-            tasks: List[Dict[str, Any]] = []
-            for row in cur.fetchall():
-                tasks.append({
-                    "id": row.Id,
-                    "template_id": row.TemplateId,
-                    "template_name": row.TemplateName,
-                    "period_type": row.PeriodType,
-                    "time_of_day": str(row.TimeOfDay) if row.TimeOfDay else None,
-                    "next_run": str(row.NextRun) if row.NextRun else None,
-                    "last_run": str(row.LastRun) if row.LastRun else None,
-                    "active": bool(row.Active),
-                    "target_type": row.TargetType,
-                    "target_value": row.TargetValue,
-                    "aggregation_type": row.AggregationType,
-                    "send_format": row.SendFormat,
-                })
-            return {"ok": True, "tasks": tasks}
+            rows = cur.fetchall()
+            return {"ok": True, "items": [_row_to_task_dict(r) for r in rows]}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
-
-@router.post("/tasks")
-def create_report_task(payload: ReportTaskCreate):
+@router.post("/schedule")
+def create_schedule(task: ReportTaskCreate):
     try:
+        wm = task.window_minutes if task.window_minutes is not None else _window_by_period(task.period_type)
+        av = task.avg_seconds if task.avg_seconds is not None else (10 if wm else None)
+        nxt = compute_initial_nextrun(task.period_type, task.time_of_day)
+
+        # StyleOverride: храним как NVARCHAR(MAX); если dict — сериализуем
+        style_override = task.style_override
+        if isinstance(style_override, dict):
+            style_override = json.dumps(style_override, ensure_ascii=False)
+
         with _db() as conn:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO ReportSchedule
-                    (TemplateId, PeriodType, TimeOfDay, TargetType, TargetValue, AggregationType, SendFormat, Active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-            """, payload.template_id, payload.period_type, payload.time_of_day,
-                         payload.target_type, payload.target_value,
-                         payload.aggregation_type, payload.send_format)
+                    (TemplateId, PeriodType, TimeOfDay,
+                     NextRun, LastRun, Active,
+                     TargetType, TargetValue,
+                     AggregationType, SendFormat,
+                     WindowMinutes, AvgSeconds,
+                     StyleId, StyleOverride)
+                VALUES (?, ?, ?, ?, NULL, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                task.template_id, task.period_type, task.time_of_day,
+                nxt,
+                task.target_type, str(task.target_value),
+                task.aggregation_type, task.send_format,
+                wm, av,
+                task.style_id, style_override
+            )
             conn.commit()
             return {"ok": True}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
-
-@router.put("/tasks/{id}")
-def update_report_task(id: int, payload: ReportTaskUpdate):
+@router.put("/schedule/{id}")
+def update_schedule(id: int, task: ReportTaskUpdate):
     try:
+        wm = task.window_minutes if task.window_minutes is not None else _window_by_period(task.period_type)
+        av = task.avg_seconds if task.avg_seconds is not None else (10 if wm else None)
+        nxt = compute_initial_nextrun(task.period_type, task.time_of_day)
+
+        style_override = task.style_override
+        if isinstance(style_override, dict):
+            style_override = json.dumps(style_override, ensure_ascii=False)
+
         with _db() as conn:
             cur = conn.cursor()
             cur.execute("""
                 UPDATE ReportSchedule
-                SET TemplateId=?, PeriodType=?, TimeOfDay=?,
-                    TargetType=?, TargetValue=?, AggregationType=?, SendFormat=?
-                WHERE Id=? 
-            """, payload.template_id, payload.period_type, payload.time_of_day,
-                         payload.target_type, payload.target_value,
-                         payload.aggregation_type, payload.send_format, id)
+                SET TemplateId=?,
+                    PeriodType=?,
+                    TimeOfDay=?,
+                    NextRun=?,
+                    TargetType=?,
+                    TargetValue=?,
+                    AggregationType=?,
+                    SendFormat=?,
+                    WindowMinutes=?,
+                    AvgSeconds=?,
+                    StyleId=?,
+                    StyleOverride=?
+                WHERE Id=?
+            """,
+                task.template_id, task.period_type, task.time_of_day, nxt,
+                task.target_type, str(task.target_value),
+                task.aggregation_type, task.send_format,
+                wm, av,
+                task.style_id, style_override,
+                id
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Задание не найдено")
             conn.commit()
             return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
-
-@router.delete("/tasks/{id}")
-def delete_report_task(id: int):
-    """
-    Физическое удаление задания из ReportSchedule.
-    Если предусмотрены логи/история по заданиям, чистить их здесь же
-    (или выставить ON DELETE CASCADE на FK).
-    """
+@router.patch("/schedule/{id}/toggle")
+def toggle_schedule(id: int, is_active: bool = Body(..., embed=True)):
     try:
         with _db() as conn:
             cur = conn.cursor()
-            cur.execute("DELETE FROM ReportSchedule WHERE Id = ?", id)
+            cur.execute("UPDATE ReportSchedule SET Active=? WHERE Id=?", int(bool(is_active)), id)
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Задание не найдено")
+            conn.commit()
+            return {"ok": True, "id": id, "is_active": bool(is_active)}
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
+@router.delete("/schedule/{id}")
+def delete_schedule(id: int):
+    try:
+        with _db() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM ReportSchedule WHERE Id=?", id)
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Задание не найдено")
             conn.commit()
@@ -1207,14 +479,327 @@ def delete_report_task(id: int):
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
+# ======== Ручной запуск задачи (run-now) ========
+def _send_to_telegram(cur, target_type: str, target_value: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    result = {"delivered": False, "mode": None}
+    if (target_type or "").lower() == "telegram":
+        try:
+            target_id = int(target_value)
+        except Exception:
+            target_id = None
+        try:
+            cur.execute("""
+                IF OBJECT_ID('dbo.ReportExports') IS NOT NULL
+                INSERT INTO ReportExports(ExportedAt, TargetType, TargetId, PayloadJson)
+                VALUES (GETDATE(), ?, ?, ?)
+            """, target_type, target_id, json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            pass
+        result["delivered"] = True
+        result["mode"] = "telegram"
+    return result
 
-@router.post("/tasks/{id}/activate")
-def activate_report_task(id: int):
+
+@router.post("/schedule/compute-nextrun")
+def compute_nextrun(payload: ReportTaskBase):
+    try:
+        nxt = compute_initial_nextrun(payload.period_type, payload.time_of_day)
+        return {"ok": True, "next_run": nxt.isoformat(sep=" ")}
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
+@router.get("/templates/{template_id}/preview-meta")
+def template_preview_meta(template_id: int):
+    """
+    Возвращает мета для превью шаблона.
+    По умолчанию рисуем тренд через dbo.sp_Telegram_CurrentValues.
+    """
+    try:
+        tag_ids = get_tag_ids_for_template(template_id) or "0"
+        return {
+            "ok": True,
+            # чем рисовать
+            "proc": "dbo.sp_Telegram_CurrentValues",
+            # маппинг колонок результата хранимки
+            "map_x": "Timestamp",
+            "map_y": "Value",
+            "map_series": "TagName",
+            "unit": None,
+            # дефолтные параметры EXEC
+            "params": {"@TagIds": tag_ids},
+            # можно добавить любые расширения в будущем
+        }
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
+# backend/app/routers/telegram_reports.py
+
+@router.post("/preview")
+def preview_legacy(payload: Dict[str, Any] = Body(...)):
+    try:
+        if not isinstance(payload, dict):
+            try:
+                payload = payload.dict()
+            except Exception:
+                payload = dict(payload or {})
+        # 1) Валидация
+        template_id = int(payload.get("template_id") or 0)
+        if not template_id:
+            raise HTTPException(status_code=422, detail="template_id is required")
+
+        # 2) meta из шаблона (proc/map/params/unit)
+        meta = template_preview_meta(template_id)
+        if meta.get("ok"):
+            meta = {k: v for k, v in meta.items() if k != "ok"}
+
+        # 3) style_override из payload (как dict)
+        style = payload.get("style_override") or {}
+        if isinstance(style, str):
+            try:
+                style = json.loads(style)
+            except Exception:
+                style = {}
+
+        is_text = (payload.get("format") or "chart").lower() == "text"
+        period  = (payload.get("period_type") or "").lower()
+
+        chart_kind = style.get("chart_kind") or (
+            "bar" if period in ("shift", "daily", "weekly", "monthly") else "line"
+        )
+
+        # 4) Выбор хранимки ИСКЛЮЧИТЕЛЬНО на бэке
+        expand_weekly = bool(style.get("expand_weekly_shifts"))
+        if period == "weekly":
+            now = datetime.now()
+            week_monday = payload.get("week_monday") or (now - timedelta(days=now.weekday())).date().isoformat()
+
+            meta_params = (meta.get("params") or {})
+            # соберём tag_ids из любых ключей
+            tag_ids = (
+                payload.get("tag_ids")
+                or payload.get("@tag_ids")
+                or payload.get("TagIds")
+                or payload.get("@TagIds")
+                or meta_params.get("@tag_ids")
+                or meta_params.get("@TagIds")
+                or meta_params.get("TagIds")
+                or meta_params.get("tag_ids")
+            )
+            if not tag_ids:
+                raise HTTPException(status_code=422, detail="weekly: не передан список тегов (@tag_ids)")
+
+            proc_name   = "dbo.sp_Telegram_WeeklyShiftCumulative"
+            proc_params = _soft_norm({"@week_monday": week_monday, "@tag_ids": tag_ids})
+
+            map_x, map_y, map_series, unit = "Period", "CumValue", "TagName", None
+            chart_kind = "bar"
+        else:
+            proc_name   = meta["proc"]
+            proc_params = _soft_norm(meta.get("params") or {})
+            map_x       = meta.get("map_x") or "Timestamp"
+            map_y       = meta.get("map_y") or "Value"
+            map_series  = meta.get("map_series")
+            unit        = meta.get("unit")
+
+        text_template = style.get("text_template") or payload.get("text_template")
+
+        # 5) Проксируем в новый движок предпросмотра (строго через модель)
+        body = {
+            "proc": proc_name,
+            "params": proc_params,
+            "mode": "text" if is_text else "chart",
+            "chart": chart_kind,
+            "map_x": map_x,
+            "map_y": map_y,
+            "map_series": map_series,
+            "unit": unit,
+            "title": style.get("chart_title") or "",
+            "text_template": text_template,
+            # НЕ передаём expand_weekly_shifts — weekly целиком решается в самой хранимке
+        }
+        return _preview2(_PreviewIn(**body))  # type: ignore
+
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
+@router.get("/styles")
+def list_styles():
     try:
         with _db() as conn:
             cur = conn.cursor()
-            cur.execute("UPDATE ReportSchedule SET Active=1 WHERE Id=?", id)
-            conn.commit()
-            return {"ok": True}
+            cur.execute("""
+                SELECT Id, Name, ChartStyle, IsDefault, UserId, CreatedAt, UpdatedAt
+                FROM ReportStyles
+                ORDER BY Id DESC
+            """)
+            out = []
+            for r in cur.fetchall():
+                try:
+                    chart = json.loads(r.ChartStyle) if r.ChartStyle else {}
+                except Exception:
+                    chart = {}
+                out.append({
+                    "id": r.Id,
+                    "name": r.Name,
+                    "style": chart,
+                    "is_default": bool(getattr(r, "IsDefault", 0)),
+                    "user_id": getattr(r, "UserId", None),
+                    "created_at": str(getattr(r, "CreatedAt", "")),
+                    "updated_at": str(getattr(r, "UpdatedAt", "")),
+                })
+            return {"ok": True, "items": out}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
+
+
+class StyleIn(BaseModel):
+    name: str
+    style: Dict[str, Any] = Field(default_factory=dict)
+
+@router.post("/styles")
+def create_style(req: StyleIn):
+    try:
+        with _db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ReportStyles(Name, ChartStyle, CreatedAt, UpdatedAt)
+                VALUES (?, ?, GETDATE(), GETDATE())
+            """, req.name, json.dumps(req.style, ensure_ascii=False))
+            conn.commit()
+            cur.execute("SELECT SCOPE_IDENTITY()")
+            new_id = int(cur.fetchone()[0])
+            return {"ok": True, "id": new_id}
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
+@router.put("/styles/{id}")
+def update_style(id: int, req: StyleIn):
+    try:
+        with _db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE ReportStyles
+                SET Name=?, ChartStyle=?, UpdatedAt=GETDATE()
+                WHERE Id=?
+            """, req.name, json.dumps(req.style, ensure_ascii=False), id)
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Стиль не найден")
+            conn.commit()
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
+
+def _http(method, url, **kwargs):
+    try:
+        return requests.request(method.upper(), url, timeout=15, **kwargs)
+    except requests.RequestException:
+        return None
+
+def send_text_to_telegram(chat_id, text, thread_id=None):
+    if not TG_TOKEN: return None
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if thread_id: data["message_thread_id"] = thread_id
+    return _http("POST", url, data=data)
+
+def send_photo_to_telegram(chat_id, image_bytes, caption="", thread_id=None):
+    if not TG_TOKEN: return None
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
+    files = {"photo": ("report.png", image_bytes)}
+    data = {"chat_id": chat_id, "caption": caption or "", "parse_mode": "HTML"}
+    if thread_id: data["message_thread_id"] = thread_id
+    return _http("POST", url, data=data, files=files)
+
+def resolve_telegram_destination(target_value):
+    # 1) Id в TelegramReportTarget
+    try:
+        as_id = int(str(target_value).strip())
+        with pyodbc.connect(get_conn_str()) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT ChannelId, ThreadId FROM TelegramReportTarget WHERE Id=?", as_id)
+            row = cur.fetchone()
+            if row:
+                return str(row.ChannelId), row.ThreadId
+    except Exception:
+        pass
+    # 2) иначе считаем, что это прямой chat_id / @username
+    return str(target_value), None
+
+
+
+@router.post("/send")
+def send(payload: SendIn = Body(...)):
+    # 1) собираем payload для preview (включая стили)
+    preview_req: Dict[str, Any] = {
+        "template_id": payload.template_id,
+        "format": payload.format,
+        "period_type": payload.period_type,
+        "time_of_day": payload.time_of_day,
+        "aggregation_type": payload.aggregation_type,
+        "window_minutes": payload.window_minutes,
+        "avg_seconds": payload.avg_seconds,
+    }
+    if payload.text_template is not None:
+        preview_req["text_template"] = payload.text_template
+    if payload.chart_title is not None:
+        preview_req["title"] = payload.chart_title
+    if payload.chart_kind is not None:
+        preview_req["chart"] = payload.chart_kind
+    if payload.expand_weekly_shifts:
+        preview_req["expand_weekly_shifts"] = True
+
+    # 2) получаем результат как в предпросмотре
+    res = preview_legacy(preview_req)   # <- ваш текущий handler preview
+
+    # 3) отправляем В ТОЧНОМ соответствии с результатом preview
+    chat_id, thread_id = resolve_telegram_destination(payload.target_value)
+    if not chat_id:
+        return {"ok": False, "detail": "channel not resolved"}
+
+    title = (res.get("title") or "").strip()
+    period = res.get("period") or {}
+    period_caption = ""
+    if period.get("date_from") and period.get("date_to"):
+        period_caption = f"Период: {period['date_from']} — {period['date_to']}"
+
+    # A) график (chart_png или data_url)
+    chart_b64 = res.get("chart_png") or res.get("image_base64")
+    data_url = res.get("data_url")
+    if payload.format == "chart" and (chart_b64 or data_url):
+        img = base64.b64decode(chart_b64) if chart_b64 and not data_url else None
+        cap = title or period_caption
+        if data_url:
+            # data_url -> скачивать не нужно: backend должен давать chart_png; но на всякий пожарный:
+            # лучше верните chart_png из preview
+            pass
+        else:
+            send_photo_to_telegram(chat_id, img, cap, thread_id)
+        return {"ok": True, "delivered": True, "preview": res}
+
+    # B) текст (используем ИМЕННО text / text_table из preview)
+    text = res.get("text") or res.get("text_table")
+    if payload.format == "text" and text:
+        msg = (f"<b>{title}</b>\n" if title else "") + f"<pre>{text}</pre>"
+        if period_caption:
+            msg += f"\n{period_caption}"
+        send_text_to_telegram(chat_id, msg, thread_id)
+        return {"ok": True, "delivered": True, "preview": res}
+
+    # C) таблица-как-текст, если пришли columns+data
+    columns = res.get("columns") or []
+    data = res.get("data") or []
+    if columns and data:
+        # тот же формат, что в воркере (красиво моноширинно)
+        from app.report_worker import format_report_table
+        table_text = format_report_table(columns, data, period_caption)
+        msg = (f"<b>{title}</b>\n" if title else "") + f"<pre>{table_text}</pre>"
+        send_text_to_telegram(chat_id, msg, thread_id)
+        return {"ok": True, "delivered": True, "preview": res}
+
+    # иначе просто ничего
+    return {"ok": True, "delivered": False, "preview": res}

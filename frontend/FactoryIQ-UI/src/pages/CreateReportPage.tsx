@@ -12,6 +12,9 @@ type Tag = {
   name: string;
   browse_name?: string;
   description?: string;
+  node_id?: string;
+  path?: string;
+  data_type?: string;
 };
 
 type ReportTagSettings = {
@@ -54,7 +57,6 @@ function getShiftFromTimeGroup(timeGroup: string | undefined): string {
   return "Ночная";
 }
 
-
 const AGGREGATE_OPTIONS = [
   { key: "", label: "Без агрегации (сырое/последнее)" },
   { key: "SUM", label: "Сумма (SUM)" },
@@ -67,7 +69,6 @@ const REPORT_TYPES = [
   { key: "balance", label: "Балансовый отчёт (по сменам и суткам)" },
   { key: "custom", label: "Настраиваемый отчёт" },
 ];
-
 
 const CreateReportPage: React.FC = () => {
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -92,64 +93,127 @@ const CreateReportPage: React.FC = () => {
   const [interval, setInterval] = useState<number>(10); // дефолтный шаг
   const [showDailySum, setShowDailySum] = useState(true);
 
+  const api = useApi();
+  const abortRef = useRef<AbortController | null>(null);
+  const [pageSize] = useState(200); // сколько тегов подгружать за раз
+
   const handleReportTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setReportType(e.target.value as "balance" | "custom");
     setSelectedTags([]);
   };
 
-  // Получение всех тегов
+  // ---------------------------
+  // ИНИЦИАЛЬНАЯ ЗАГРУЗКА ТЕГОВ
+  // ---------------------------
   useEffect(() => {
-    fetch(`${useApi}/tags/all`)
-      .then((res) => res.json())
-      .then((data) => setAllTags(data.items || []));
-  }, []);
+    api
+      .get<{ items: Tag[] }>("/tags/all-tags", { page: 1, page_size: pageSize })
+      .then((data) => setAllTags(data.items || []))
+      .catch((err) => console.error("Ошибка загрузки тегов:", err));
+  }, [api, pageSize]);
 
+  // ------------------------------------------
+  // СЕРВЕРНЫЙ ПОИСК ТЕГОВ ПО ВВОДУ (дебаунс)
+  // ------------------------------------------
+// useEffect debounce фильтра
+useEffect(() => {
+  if (!filter.trim()) return;
+
+  abortRef.current?.abort();
+  const controller = new AbortController();
+  abortRef.current = controller;
+
+  const timeout = setTimeout(() => {
+    api
+      .get<{ items: Tag[] }>("/tags/all-tags", {
+        page: 1,
+        page_size: 200,
+        search: filter, // ✅ только одно поле
+      })
+      .then((data) => setAllTags(data.items || []))
+      .catch(() => {});
+  }, 250);
+
+  return () => {
+    clearTimeout(timeout);
+    controller.abort();
+  };
+}, [filter, api]);
+
+
+
+  // --------------------
+  // ЗАГРУЗКА ШАБЛОНОВ
+  // --------------------
   useEffect(() => {
-    fetch(`${useApi}/reports/templates`)
-      .then((res) => res.json())
+    api
+      .get<{ ok: boolean; templates: ReportTemplate[] }>("/reports/templates")
       .then((data) => {
         if (data.ok) setTemplates(data.templates || []);
-      });
-  }, []);
+      })
+      .catch((e) => console.error("Ошибка загрузки шаблонов:", e));
+  }, [api]);
 
+  // --------------------------
+  // ПОКАЗАТЬ ТЕГИ У ШАБЛОНА
+  // --------------------------
   const handleShowTags = (templateId: number) => {
     setSelectedTemplateId(templateId);
     setShowTemplateTags(false);
-    fetch(`${useApi}/reports/templates/${templateId}`)
-      .then((res) => res.json())
+    api
+      .get<{ ok: boolean; template: ReportTemplate }>(`/reports/templates/${templateId}`)
       .then((data) => {
         if (data.ok && data.template) {
           setTemplateTags(data.template.tags || []);
           setShowTemplateTags(true);
         }
-      });
+      })
+      .catch((e) => console.error("Ошибка загрузки тегов шаблона:", e));
   };
 
+  // --------------------------
+  // УДАЛЕНИЕ ШАБЛОНА
+  // --------------------------
   const handleDeleteTemplate = (templateId: number) => {
     if (!window.confirm("Удалить этот шаблон?")) return;
-    fetch(`${useApi}/reports/templates/${templateId}`, {
-      method: "DELETE",
-    })
-      .then((res) => res.json())
+    api
+      .del<{ ok: boolean }>(`/reports/templates/${templateId}`)
       .then((data) => {
         if (data.ok) {
-          setTemplates(templates.filter((t) => t.id !== templateId));
+          setTemplates((prev) => prev.filter((t) => t.id !== templateId));
           setShowTemplateTags(false);
         } else {
           alert("Ошибка удаления");
         }
-      });
+      })
+      .catch((e) => alert("Ошибка удаления: " + e.message));
   };
 
-  // Фильтрация тегов
+  // -------------------------------------------
+  // КЛИЕНТСКАЯ ФИЛЬТРАЦИЯ (в дополнение к API)
+  // -------------------------------------------
   const filteredTags = allTags
     .filter((t) => !selectedTags.some((sel) => sel.tag.id === t.id))
-    .filter((t) =>
-      (t.browse_name || t.name || "")
-        .toLowerCase()
-        .includes(filter.toLowerCase())
-    );
+    .filter((t) => {
+      const q = filter.trim().toLowerCase();
+      if (!q) return true;
+      const haystack = [
+        t.browse_name,
+        t.name,
+        t.node_id,
+        t.description,
+        t.path,
+        t.data_type,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
 
+  // --------------------------
+  // ВЫБОР И УДАЛЕНИЕ ТЕГОВ
+  // --------------------------
   const handleInputFocus = () => setDropdownOpen(true);
   const handleInputBlur = () => setTimeout(() => setDropdownOpen(false), 150);
 
@@ -162,8 +226,8 @@ const CreateReportPage: React.FC = () => {
 
   const addTag = (tag: Tag) => {
     if (selectedTags.some((st) => st.tag.id === tag.id)) return;
-    setSelectedTags([
-      ...selectedTags,
+    setSelectedTags((prev) => [
+      ...prev,
       {
         id: Date.now() + Math.random(),
         tag,
@@ -174,32 +238,42 @@ const CreateReportPage: React.FC = () => {
     ]);
   };
 
-  // Загрузка тегов шаблона по ID (чтобы заполнять selectedTags)
+  const removeTag = (id: number) => {
+    setSelectedTags((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // --------------------------
+  // ЗАГРУЗКА ТЕГОВ ШАБЛОНА -> selectedTags
+  // --------------------------
   async function loadTemplateTagsForReport(templateId: number): Promise<ReportTagSettings[]> {
-    const res = await fetch(`${useApi}/reports/templates/${templateId}`);
-    const data = await res.json();
+    const data = await api.get<{ ok: boolean; template: ReportTemplate }>(
+      `/reports/templates/${templateId}`
+    );
     if (data.ok && data.template) {
-      const selectedTagsFromTemplate: ReportTagSettings[] = (data.template.tags || []).map((t: ReportTemplateTag) => {
-        const tagInfo = allTags.find((at) => at.id === t.tag_id);
-        return {
-          id: Date.now() + Math.random(),
-          tag: tagInfo || { id: t.tag_id, name: t.tag_id.toString() },
-          type: t.tag_type as "counter" | "current",
-          aggregate: (t.aggregate || "") as "" | "SUM" | "AVG" | "MIN" | "MAX",
-          intervalMinutes: t.interval_minutes,
-        };
-      });
+    
+const selectedTagsFromTemplate: ReportTagSettings[] =
+  (data.template.tags || []).map((t: any) => ({
+    id: Date.now() + Math.random(),
+    tag: {
+      id: t.tag_id,
+      name: t.name || String(t.tag_id),
+      browse_name: t.browse_name,
+      description: t.description
+    },
+    type: t.tag_type as "counter" | "current",
+    aggregate: (t.aggregate || "") as "" | "SUM" | "AVG" | "MIN" | "MAX",
+    intervalMinutes: t.interval_minutes,
+  }));
+
       setSelectedTags(selectedTagsFromTemplate);
       return selectedTagsFromTemplate;
     }
     return [];
   }
 
-  const removeTag = (id: number) => {
-    setSelectedTags(selectedTags.filter((t) => t.id !== id));
-  };
-
-  // Сохранить шаблон
+  // --------------------------
+  // СОХРАНИТЬ ШАБЛОН
+  // --------------------------
   const saveTemplate = () => {
     if (!templateName.trim()) {
       alert("Введите название шаблона");
@@ -212,18 +286,17 @@ const CreateReportPage: React.FC = () => {
     setLoading(true);
 
     // Для custom — все теги получают одинаковые агрегацию/интервал из формы
-    const tagsToSave: ReportTagSettings[] = reportType === "custom"
-      ? selectedTags.map((t) => ({
-        ...t,
-        aggregate: aggregate,
-        intervalMinutes: interval,
-      }))
-      : selectedTags;
+    const tagsToSave: ReportTagSettings[] =
+      reportType === "custom"
+        ? selectedTags.map((t) => ({
+            ...t,
+            aggregate: aggregate,
+            intervalMinutes: interval,
+          }))
+        : selectedTags;
 
-    fetch(`${useApi}/reports/templates/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    api
+      .post<{ ok: boolean; detail?: string }>(`/reports/templates/create`, {
         name: templateName,
         description: "",
         report_type: reportType,
@@ -237,22 +310,27 @@ const CreateReportPage: React.FC = () => {
         is_shared: false,
         auto_schedule: false,
         target_channel: null,
-      }),
-    })
-      .then((res) => res.json())
+      })
       .then((data) => {
         if (data.ok) {
           alert("Шаблон сохранён!");
           setTemplateName("");
+          // Перечитать список шаблонов
+          return api.get<{ ok: boolean; templates: ReportTemplate[] }>("/reports/templates");
         } else {
-          alert("Ошибка сохранения: " + (data.detail || "Неизвестно"));
+          throw new Error(data.detail || "Неизвестно");
         }
       })
-      .catch((e) => alert("Ошибка: " + e.message))
+      .then((res) => {
+        if (res?.ok) setTemplates(res.templates || []);
+      })
+      .catch((e: any) => alert("Ошибка сохранения: " + e.message))
       .finally(() => setLoading(false));
   };
 
-
+  // --------------------------
+  // ПОСТРОИТЬ ПО ШАБЛОНУ
+  // --------------------------
   const handleBuildByTemplate = async (templateId: number, tplReportType: string) => {
     setReportType(tplReportType as "balance" | "custom");
     if (!dateFrom || !dateTo) {
@@ -270,46 +348,39 @@ const CreateReportPage: React.FC = () => {
 
     let tagsForBuild: ReportTagSettings[] = loadedTags;
     if (tplReportType === "custom") {
-      tagsForBuild = loadedTags.map(t => ({
+      tagsForBuild = loadedTags.map((t) => ({
         ...t,
         aggregate: aggregate,
         intervalMinutes: interval,
       }));
     }
 
-    // КРИТИЧНО: подставить теги из шаблона как выбранные для баланса!
+    // для balance — показать выбранные теги
     if (tplReportType === "balance") {
       setSelectedTags(loadedTags);
     }
 
-    const url =
-      tplReportType === "balance"
-        ? `${useApi}/reports/build`
-        : `${useApi}/reports/build_custom`;
+    const url = tplReportType === "balance" ? `/reports/build` : `/reports/build_custom`;
 
     const payload =
       tplReportType === "balance"
         ? {
-          template_id: templateId,
-          date_from: toSqlDatetime(dateFrom),
-          date_to: toSqlDatetime(dateTo),
-        }
+            template_id: templateId,
+            date_from: toSqlDatetime(dateFrom),
+            date_to: toSqlDatetime(dateTo),
+          }
         : {
-          tags: tagsForBuild.map((t) => ({
-            tag_id: t.tag.id,
-            aggregate: t.aggregate || "",
-            interval_minutes: t.intervalMinutes,
-          })),
-          date_from: toSqlDatetime(dateFrom),
-          date_to: toSqlDatetime(dateTo),
-        };
+            tags: tagsForBuild.map((t) => ({
+              tag_id: t.tag.id,
+              aggregate: t.aggregate || "",
+              interval_minutes: t.intervalMinutes,
+            })),
+            date_from: toSqlDatetime(dateFrom),
+            date_to: toSqlDatetime(dateTo),
+          };
 
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((res) => res.json())
+    api
+      .post<{ ok: boolean; data?: any[]; detail?: string }>(url, payload)
       .then((data) => {
         if (data.ok) {
           if (tplReportType === "custom") {
@@ -317,7 +388,6 @@ const CreateReportPage: React.FC = () => {
             setReportTableRows(grouped);
             setReportBuilt(true);
           } else {
-            // balance
             const groupedRows: Record<string, any> = {};
             (data.data || []).forEach((row: any) => {
               const key = `${row.Date}_${row["Смена"]}`;
@@ -329,9 +399,7 @@ const CreateReportPage: React.FC = () => {
               }
               const rawVal = row["Прирост"] ?? row["Value"] ?? row["Значение"];
               groupedRows[key][row.TagName] =
-                rawVal !== undefined
-                  ? +(parseFloat(String(rawVal)) / 1000).toFixed(1)
-                  : "-";
+                rawVal !== undefined ? +(parseFloat(String(rawVal)) / 1000).toFixed(1) : "-";
             });
             setReportTableRows(Object.values(groupedRows));
             setReportBuilt(true);
@@ -340,14 +408,13 @@ const CreateReportPage: React.FC = () => {
           alert("Ошибка построения: " + (data.detail || "Неизвестно"));
         }
       })
-      .catch((e) => alert("Ошибка: " + e.message))
+      .catch((e: any) => alert("Ошибка: " + e.message))
       .finally(() => setLoading(false));
   };
 
-
-
-
-  // --- Конвертация даты в формат SQL ---
+  // ---------------------------------
+  // Конвертация даты в формат SQL
+  // ---------------------------------
   function toSqlDatetime(dateStr: string): string {
     if (!dateStr) return "";
     let d = dateStr.length >= 19 ? dateStr.slice(0, 19) : dateStr;
@@ -357,20 +424,18 @@ const CreateReportPage: React.FC = () => {
     return d;
   }
 
-  // --- Группировка строк по времени и тегу (универсальная, с типами) ---
-
-
+  // -------------------------------------------------
+  // Группировка строк по времени и тегу (универсальная)
+  // -------------------------------------------------
   function groupRowsForTable(
     rows: { TagId: number; TimeGroup: string; Value: number | null }[],
-    selectedTags: ReportTagSettings[]
+    selected: ReportTagSettings[]
   ): any[] {
-    // Собираем все уникальные TimeGroup
     const timeGroups = Array.from(new Set(rows.map((r) => r.TimeGroup))).sort();
 
     return timeGroups.map((tg) => {
       const row: any = { TimeGroup: tg };
-      selectedTags.forEach((tag) => {
-        // ищем строку с нужным TagId и TimeGroup
+      selected.forEach((tag) => {
         const entry = rows.find(
           (r) => r.TimeGroup === tg && String(r.TagId) === String(tag.tag.id)
         );
@@ -380,9 +445,9 @@ const CreateReportPage: React.FC = () => {
     });
   }
 
-
-
-  // --- Построить отчёт вручную ---
+  // --------------------------
+  // ПОСТРОИТЬ ОТЧЁТ ВРУЧНУЮ
+  // --------------------------
   const buildReport = () => {
     if (selectedTags.length === 0) {
       alert("Выберите хотя бы один тег");
@@ -395,12 +460,9 @@ const CreateReportPage: React.FC = () => {
     setLoading(true);
     setReportBuilt(false);
 
-    // Для custom-отчёта
     if (reportType === "custom") {
-      fetch(`${useApi}/reports/build_custom`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      api
+        .post<{ ok: boolean; data?: any[]; detail?: string }>("/reports/build_custom", {
           tags: selectedTags.map((t) => ({
             tag_id: t.tag.id,
             aggregate,
@@ -408,15 +470,11 @@ const CreateReportPage: React.FC = () => {
           })),
           date_from: toSqlDatetime(dateFrom),
           date_to: toSqlDatetime(dateTo),
-        }),
-      })
-        .then((res) => res.json())
+        })
         .then((data) => {
           if (data.ok) {
-            console.log('raw rows:', data.data) // до groupRowsForTable
             const grouped = groupRowsForTable(data.data || [], selectedTags);
             setReportTableRows(grouped);
-            console.log('grouped:', grouped); // <- вот так можно!
             setReportBuilt(true);
           } else {
             alert("Ошибка построения: " + (data.detail || "Неизвестно"));
@@ -424,7 +482,7 @@ const CreateReportPage: React.FC = () => {
             setReportBuilt(false);
           }
         })
-        .catch((e) => {
+        .catch((e: any) => {
           alert("Ошибка: " + e.message);
           setReportTableRows([]);
           setReportBuilt(false);
@@ -433,11 +491,9 @@ const CreateReportPage: React.FC = () => {
       return;
     }
 
-    // Для балансового отчёта
-    fetch(`${useApi}/reports/build`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Балансовый отчёт
+    api
+      .post<{ ok: boolean; data?: any[]; detail?: string }>("/reports/build", {
         tags: selectedTags.map((t) => ({
           tag_id: t.tag.id,
           tag_type: t.type,
@@ -446,19 +502,14 @@ const CreateReportPage: React.FC = () => {
         })),
         date_from: toSqlDatetime(dateFrom),
         date_to: toSqlDatetime(dateTo),
-      }),
-    })
-      .then((res) => res.json())
+      })
       .then((data) => {
         if (data.ok) {
           const groupedRows: Record<string, any> = {};
           (data.data || []).forEach((row: any) => {
             const key = `${row.Date}_${row["Смена"]}`;
             if (!groupedRows[key]) {
-              groupedRows[key] = {
-                Date: row.Date,
-                Смена: row["Смена"],
-              };
+              groupedRows[key] = { Date: row.Date, Смена: row["Смена"] };
             }
             const rawVal = row["Прирост"] ?? row["Value"] ?? row["Значение"];
             const parsed = parseFloat(String(rawVal).replace(",", "."));
@@ -474,7 +525,7 @@ const CreateReportPage: React.FC = () => {
           setReportBuilt(false);
         }
       })
-      .catch((e) => {
+      .catch((e: any) => {
         alert("Ошибка: " + e.message);
         setReportTableRows([]);
         setReportBuilt(false);
@@ -482,10 +533,12 @@ const CreateReportPage: React.FC = () => {
       .finally(() => setLoading(false));
   };
 
-  // --- Формат даты для таблицы ---
+  // --------------------------
+  // Формат даты для таблицы
+  // --------------------------
   function formatDateTimeCustom(dt: string): string {
     if (!dt) return "";
-    let s = dt.replace("T", " ").slice(0, 19); // убирает "T", если есть
+    let s = dt.replace("T", " ").slice(0, 19);
     const [date, time] = s.split(" ");
     if (!date || !time) return s;
     const [y, m, d] = date.split("-");
@@ -493,7 +546,9 @@ const CreateReportPage: React.FC = () => {
     return `${d}.${m}.${y} ${time}`;
   }
 
-  // --- Экспорт в Excel ---
+  // --------------------------
+  // Экспорт в Excel
+  // --------------------------
   const exportToExcel = () => {
     if (!reportTableRows.length || selectedTags.length === 0) return;
 
@@ -504,9 +559,7 @@ const CreateReportPage: React.FC = () => {
       headers = [
         "Дата",
         "Смена",
-        ...selectedTags.map(
-          (t) => `${t.tag.description || t.tag.browse_name || t.tag.name}`
-        ),
+        ...selectedTags.map((t) => `${t.tag.description || t.tag.browse_name || t.tag.name}`),
       ];
       dataRows = reportTableRows.map((row) => [
         row.Date,
@@ -523,9 +576,7 @@ const CreateReportPage: React.FC = () => {
       headers = [
         "Дата и время",
         "Смена",
-        ...selectedTags.map(
-          (t) => `${t.tag.description || t.tag.browse_name || t.tag.name}`
-        ),
+        ...selectedTags.map((t) => `${t.tag.description || t.tag.browse_name || t.tag.name}`),
       ];
       dataRows = reportTableRows.map((row) => [
         formatDateTimeCustom(row.TimeGroup),
@@ -543,9 +594,7 @@ const CreateReportPage: React.FC = () => {
     let ws_data: any[][] = [];
     if (reportType === "balance") {
       // Считаем итог только по "Сутки"
-      const dailyRows = reportTableRows.filter(
-        (row) => row["Смена"] === "Сутки"
-      );
+      const dailyRows = reportTableRows.filter((row) => row["Смена"] === "Сутки");
       const totals: Record<string, number> = {};
       selectedTags.forEach((t) => {
         const key = getTagKey(t.tag);
@@ -573,6 +622,7 @@ const CreateReportPage: React.FC = () => {
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const cell = XLSX.utils.encode_cell({ c: C, r: 0 });
       if (ws[cell]) {
+        // @ts-ignore
         ws[cell].s = {
           font: { bold: true },
           alignment: { horizontal: "center", vertical: "center" },
@@ -581,6 +631,7 @@ const CreateReportPage: React.FC = () => {
       }
     }
     // Автоширина
+    // @ts-ignore
     ws["!cols"] = headers.map((_, i) => {
       const colValues = ws_data.map((row) => String(row[i] ?? ""));
       const maxLen = Math.max(...colValues.map((val) => val.length));
@@ -594,14 +645,12 @@ const CreateReportPage: React.FC = () => {
       type: "array",
       cellStyles: true,
     });
-    saveAs(
-      new Blob([buf], { type: "application/octet-stream" }),
-      "report.xlsx"
-    );
+    saveAs(new Blob([buf], { type: "application/octet-stream" }), "report.xlsx");
   };
 
-
-  // --- Итоги по тегам для балансового отчёта (вычисляются на лету) ---
+  // -------------------------------------------
+  // Итоги по тегам для балансового отчёта (live)
+  // -------------------------------------------
   const dailyRows = reportTableRows.filter((row) => row["Смена"] === "Сутки");
   const totals: Record<string, number> = {};
   selectedTags.forEach((t) => {
@@ -609,11 +658,7 @@ const CreateReportPage: React.FC = () => {
     totals[tagKey] = dailyRows.reduce((sum, row) => {
       const value = row[tagKey];
       if (typeof value === "number") return sum + value;
-      if (
-        typeof value === "string" &&
-        value.trim() !== "" &&
-        !isNaN(Number(value))
-      )
+      if (typeof value === "string" && value.trim() !== "" && !isNaN(Number(value)))
         return sum + Number(value);
       return sum;
     }, 0);

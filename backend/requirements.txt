@@ -1,10 +1,24 @@
+# --- Core ---
+fastapi>=0.110
+uvicorn[standard]>=0.30
 python-dotenv
-pyodbc
-asyncua
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-core
 typing-extensions
-matplotlib
-python-jose[cryptography]
+
+# --- Database ---
+pyodbc
+
+# --- OPC UA ---
+opcua>=0.98.13
+cryptography>=42.0
+python-multipart   # если планируются form-data запросы (обычно нужны в FastAPI)
+
+# --- Data processing ---
+pandas>=2.0
+matplotlib>=3.8
+
+# --- Auth / Security ---
+python-jose[cryptography]>=3.3.0
+requests>=2.31
+
+# --- Utils ---
+aiofiles>=23.1.0   # если используешь async файловые операции

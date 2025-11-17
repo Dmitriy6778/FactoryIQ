@@ -1,26 +1,50 @@
-#main.py
+# app/main.py
 from fastapi import FastAPI
-from .routers import servers, db, tags, polling, analytics, reports, telegram_reports, telegram_channels
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import report_styles
-from .routers import report_templates
-from .routers import auth as auth_router
+
+from .routers import (
+    servers,
+    db,
+    tags,
+    polling,
+    analytics,
+    reports,
+    telegram_reports,
+    telegram_simple,
+    telegram_channels,
+    report_styles,
+    auth as auth_router,
+)
+from app.routers import opctags
+from app.routers import system_router  
+from app.routers import maintenance_router
 
 app = FastAPI(
-    title="FactoryIQ API",
+    title="FabrIQ API",
     description="OPC-UA Historian Backend for FactoryIQ",
-    version="1.1.0"
+    version="1.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",  # ← важно
 )
 
-# Добавлять CORS только после создания app!
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Можно указать ["http://localhost:5173"]
+    allow_origins=[
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost",            # если открываешь без порта
+    "https://factoryiq.local",
+    "http://factoryiq.local", 
+    ],        
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Роуты
 app.include_router(servers.router)
 app.include_router(db.router)
 app.include_router(tags.router)
@@ -29,10 +53,13 @@ app.include_router(analytics.router)
 app.include_router(reports.router)
 app.include_router(telegram_reports.router)
 app.include_router(report_styles.router)
-app.include_router(report_templates.router)
 app.include_router(telegram_channels.router)
-app.include_router(auth_router.router)  
+app.include_router(auth_router.router)
+app.include_router(opctags.router)
+app.include_router(system_router.router)  # ✅ используем system_router
+app.include_router(maintenance_router.router)
+app.include_router(telegram_simple.router)
 
 @app.get("/")
 def root():
-    return {"msg": "FactoryIQ backend is running!"}
+    return {"msg": "Fabriq backend is running!"}

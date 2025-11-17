@@ -318,11 +318,6 @@ def me(user=Depends(get_current_user)):
     perms = get_user_permissions(user["id"])
     return {"user": user, "permissions": perms}
 
-
-@router.get("/permissions/{user_id}", response_model=List[str])
-def list_permissions(user_id: int, _=Depends(require_permissions(any_of=["Users.Manage"]))):
-    return get_user_permissions(user_id)
-
 @router.post("/permissions/grant")
 def grant_permission(body: PermissionChange = Body(...), admin=Depends(require_permissions(any_of=["Users.Manage"]))):
     perm = (body.permission or "").strip()
@@ -361,6 +356,14 @@ def revoke_permission(body: PermissionChange = Body(...), _=Depends(require_perm
 @router.get("/permissions/catalog", response_model=List[str])
 def permissions_catalog(_=Depends(require_permissions(any_of=["Users.Manage"]))):
     return PERMISSIONS_CATALOG
+
+@router.get("/permissions/{user_id}", response_model=List[str])
+def list_permissions(user_id: int, _=Depends(require_permissions(any_of=["Users.Manage"]))):
+    return get_user_permissions(user_id)
+
+@router.get("/permissions/by-user/{user_id}", response_model=List[str])
+def list_permissions_by_user(user_id: int, _=Depends(require_permissions(any_of=["Users.Manage"]))):
+    return get_user_permissions(user_id)
 
 @router.post("/roles/apply")
 def apply_role(body: RoleApplyBody = Body(...), admin=Depends(require_permissions(any_of=["Users.Manage"]))):

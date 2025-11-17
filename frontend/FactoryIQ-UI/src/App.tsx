@@ -16,16 +16,20 @@ import LoginPage from "./components/Auth/LoginPage";
 import { ProtectedRoute } from "./components/Auth/PermissionGuard";
 import UsersAdminPage from "./pages/UsersAdminPage";
 
+// новая страница мониторинга служб
+import ServiceMonitorPage from "./pages/ServiceMonitorPage";
+
 import SetupWizard from "./components/Auth/SetupWizard";
+import MaintenanceLogPage from "./pages/MaintenanceLogPage";
+
 
 const App: React.FC = () => (
-
   <Routes>
     {/* ----------- Публичные маршруты ----------- */}
     <Route path="/setup" element={<SetupWizard />} />
     <Route path="/login" element={<LoginPage />} />
-    <Route path="/settings/users" element={<UsersAdminPage />} />
-    {/* <Route path="/setup" element={<SetupWizard />} /> */}
+<Route path="/maintenance/ui" element={<MaintenanceLogPage/>} />
+
 
     {/* ----------- Защищённые маршруты ----------- */}
     <Route
@@ -33,6 +37,16 @@ const App: React.FC = () => (
       element={
         <ProtectedRoute anyOf={["Servers.View", "Polling.View", "Tags.View", "Analytics.View"]}>
           <StartPage />
+        </ProtectedRoute>
+      }
+    />
+
+    {/* Мониторинг служб / воркеров */}
+    <Route
+      path="/monitor/services"
+      element={
+        <ProtectedRoute anyOf={["System.View", "Settings.Manage", "Admin"]}>
+          <ServiceMonitorPage />
         </ProtectedRoute>
       }
     />
@@ -60,6 +74,16 @@ const App: React.FC = () => (
       element={
         <ProtectedRoute anyOf={["Settings.Manage", "Admin", "Users.Manage"]}>
           <SettingsPage />
+        </ProtectedRoute>
+      }
+    />
+
+    {/* Управление пользователями — теперь тоже защищено */}
+    <Route
+      path="/settings/users"
+      element={
+        <ProtectedRoute anyOf={["Users.Manage", "Admin"]}>
+          <UsersAdminPage />
         </ProtectedRoute>
       }
     />
@@ -109,6 +133,9 @@ const App: React.FC = () => (
       }
     />
 
+  
+
+
     {/* ----------- fallback 404 ----------- */}
     <Route
       path="*"
@@ -120,7 +147,6 @@ const App: React.FC = () => (
       }
     />
   </Routes>
-
 );
 
 export default App;

@@ -10,7 +10,8 @@ import {
   ActivitySquare,
   BarChart2,
   FileText,
-  UserCog,     // 🔐 Новая иконка
+  UserCog,
+  Cpu, // 🆕 иконка для мониторинга служб
 } from "lucide-react";
 
 const StartPage: React.FC = () => {
@@ -81,6 +82,14 @@ const StartPage: React.FC = () => {
               <FileText size={22} /> Телеграм-каналы
             </button>
 
+            {/* 🆕 Мониторинг служб */}
+            <button
+              className={`btn ${styles.fullBtn}`}
+              onClick={() => navigate("/monitor/services")}
+            >
+              <Cpu size={22} /> Мониторинг служб
+            </button>
+
             <button
               className={`btn ${styles.fullBtn}`}
               onClick={() => navigate("/settings")}
@@ -88,7 +97,7 @@ const StartPage: React.FC = () => {
               <Settings size={22} /> Настройки системы
             </button>
 
-            {/* 🔐 Новый модуль */}
+            {/* 🔐 Пользователи и права */}
             <button
               className={`btn ${styles.fullBtn} ${styles.adminBtn}`}
               onClick={() => navigate("/settings/users")}

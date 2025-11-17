@@ -1,13 +1,6 @@
 import React, { useEffect, useState } from "react";
 import styles from "../styles/OpcServerPage.module.css";
-import {
-  Server,
-  ListChecks,
-  CloudCog,
-  RefreshCw,
-  Plus,
-  Search,
-} from "lucide-react";
+import { Server, ListChecks, CloudCog, RefreshCw, Plus, Search } from "lucide-react";
 import BackButton from "../components/BackButton";
 import { Tree } from "antd";
 import { useApi } from "../shared/useApi";
@@ -30,6 +23,7 @@ type OpcTag = {
   value?: any;
   description?: string;
 };
+
 type OpcServer = {
   id?: number;
   name: string;
@@ -45,7 +39,6 @@ const DEFAULT_POLICIES = ["Basic256Sha256", "None"];
 const DEFAULT_MODES = ["Sign", "SignAndEncrypt", "None"];
 
 const OpcServerPage: React.FC = () => {
-  // --- STATES ---
   const [servers, setServers] = useState<OpcServer[]>([]);
   const [newServer, setNewServer] = useState<OpcServer>({
     name: "",
@@ -77,7 +70,7 @@ const OpcServerPage: React.FC = () => {
 
   const api = useApi();
 
-  // --- Tree загрузка/подгрузка ---
+  // Подгрузка веток дерева
   useEffect(() => {
     if (selectedServer) loadChildren("i=85", null);
     else setTreeData([]);
@@ -86,18 +79,20 @@ const OpcServerPage: React.FC = () => {
     setSelectedNodeKey(null);
   }, [selectedServer]);
 
+  // !!! FIX: правильные имена query-параметров под бэкенд
   const loadChildren = async (nodeId: string, parentKey: string | null) => {
     if (!selectedServer) return;
-    const params = new URLSearchParams({
+    const params = {
       endpoint_url: selectedServer.endpoint_url,
       node_id: nodeId,
-      username: selectedServer.opcUsername || "",
-      password: selectedServer.opcPassword || "",
-      security_policy: selectedServer.securityPolicy || "Basic256Sha256",
-      security_mode: selectedServer.securityMode || "Sign",
-    }).toString();
-    const data = await api.get<{ items: OpcTag[] }>("/tags/browse_full", Object.fromEntries(new URLSearchParams(params)));
-    const nodes = (data.items || []).map((tag: OpcTag) => ({
+      opcUsername: selectedServer.opcUsername || "",
+      opcPassword: selectedServer.opcPassword || "",
+      securityPolicy: selectedServer.securityPolicy || "Basic256Sha256",
+      securityMode: selectedServer.securityMode || "Sign",
+    };
+    const data = await api.get<{ ok: boolean; items: OpcTag[]; error?: string }>("/tags/browse_full", params);
+    const items = data?.items || [];
+    const nodes: TreeNode[] = items.map((tag) => ({
       title: tag.browse_name,
       key: tag.node_id,
       isLeaf: String(tag.node_class).toLowerCase() === "variable" || String(tag.node_class) === "2",
@@ -107,11 +102,12 @@ const OpcServerPage: React.FC = () => {
     else setTreeData((origin) => updateNodeChildren(origin, parentKey, nodes));
   };
 
+  // Кнопка: полное сканирование и сохранение в БД
   const handleScanFullTree = async (srv: OpcServer) => {
     if (!window.confirm("Создать полную карту тегов для этого сервера? Это может занять несколько минут.")) return;
-    setIsScanningFullTree(true);   // включаем лоадер!
+    setIsScanningFullTree(true);
     try {
-      const data = await api.post<{ count: number; inserted: number; debug_first_tags?: any[] }>(
+      const data = await api.post<{ ok: boolean; found?: number; inserted?: number; debug_first_tags?: any[]; error?: string }>(
         "/servers/scan_full_tree",
         {
           server_id: srv.id,
@@ -123,19 +119,17 @@ const OpcServerPage: React.FC = () => {
         }
       );
 
-
-      console.log("[FRONT] Ответ на карту тегов:", data);
+      const found = data?.found ?? 0;     // !!! FIX: поле называется found
+      const inserted = data?.inserted ?? 0;
       alert(
-        `Готово! Найдено ${data.count}, сохранено ${data.inserted} тегов.\n\nПервые теги:\n` +
-        JSON.stringify(data.debug_first_tags || [], null, 2)
+        `Готово! Найдено ${found}, сохранено ${inserted} тегов.\n\nПервые теги:\n` +
+        JSON.stringify(data?.debug_first_tags || [], null, 2)
       );
     } catch (err) {
       alert("Ошибка соединения: " + err);
     }
-    setIsScanningFullTree(false);  // отключаем лоадер!
+    setIsScanningFullTree(false);
   };
-
-
 
   function updateNodeChildren(nodes: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
     return nodes.map((node) => {
@@ -145,38 +139,31 @@ const OpcServerPage: React.FC = () => {
     });
   }
 
-  // Собирает все leaf-узлы под выбранным key
-  const collectLeafTagsByKey = (nodes: TreeNode[], key: string): OpcTag[] => {
-    let result: OpcTag[] = [];
-    const visit = (node: TreeNode) => {
-      if (node.key === key) {
-        collectAllLeafs(node, result);
-        return true;
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          if (visit(child)) return true;
-        }
-      }
-      return false;
-    };
-    for (const node of nodes) {
-      if (visit(node)) break;
-    }
-    return result;
-  };
-
   const collectAllLeafs = (node: TreeNode, result: OpcTag[]) => {
     if (node.isLeaf && node.data) result.push(node.data);
-    if (node.children) node.children.forEach(child => collectAllLeafs(child, result));
+    if (node.children) node.children.forEach((child) => collectAllLeafs(child, result));
   };
 
-  // --- Получение справочников, серверов и т.д. ---
+  const collectLeafTagsByKey = (nodes: TreeNode[], key: string): OpcTag[] => {
+    let res: OpcTag[] = [];
+    const visit = (n: TreeNode): boolean => {
+      if (n.key === key) {
+        collectAllLeafs(n, res);
+        return true;
+      }
+      if (n.children) for (const c of n.children) if (visit(c)) return true;
+      return false;
+    };
+    for (const n of nodes) if (visit(n)) break;
+    return res;
+  };
+
+  // Справочники/интервалы/серверы
   useEffect(() => {
     api.get<any>("/servers/opc_security_options")
       .then((opts) => {
-        setSecurityPolicies(opts.policies && opts.policies.length > 0 ? opts.policies : DEFAULT_POLICIES);
-        setSecurityModes(opts.modes && opts.modes.length > 0 ? opts.modes : DEFAULT_MODES);
+        setSecurityPolicies(opts.policies?.length ? opts.policies : DEFAULT_POLICIES);
+        setSecurityModes(opts.modes?.length ? opts.modes : DEFAULT_MODES);
         setNewServer((s) => ({
           ...s,
           securityPolicy: opts.defaultPolicy || DEFAULT_POLICIES[0],
@@ -186,43 +173,36 @@ const OpcServerPage: React.FC = () => {
       .catch(() => {
         setSecurityPolicies(DEFAULT_POLICIES);
         setSecurityModes(DEFAULT_MODES);
-        setNewServer((s) => ({
-          ...s,
-          securityPolicy: DEFAULT_POLICIES[0],
-          securityMode: DEFAULT_MODES[0],
-        }));
+        setNewServer((s) => ({ ...s, securityPolicy: DEFAULT_POLICIES[0], securityMode: DEFAULT_MODES[0] }));
       });
   }, []);
+
   useEffect(() => {
     api.get<{ items: { id: number; name: string; intervalSeconds: number }[] }>("/polling/polling-intervals")
       .then((data) => setIntervals(data.items || []));
-
   }, []);
-  useEffect(() => { fetchServers(); }, []);
 
+  useEffect(() => { fetchServers(); }, []);
   const fetchServers = async () => {
     const data = await api.get<OpcServer[]>("/servers/servers");
     setServers(data || []);
   };
 
-
-  // --- Функции работы с серверами (добавление/удаление/изменение) ---
   const checkServer = async () => {
-    const queryParams = new URLSearchParams({
+    const params = {
       endpoint_url: newServer.endpoint_url,
       opcUsername: newServer.opcUsername || "",
       opcPassword: newServer.opcPassword || "",
       securityPolicy: newServer.securityPolicy || DEFAULT_POLICIES[0],
       securityMode: newServer.securityMode || DEFAULT_MODES[0],
-    }).toString();
+    };
     setProbeResult("Проверка...");
-    const data = await api.get<{ message?: string }>("/servers/probe", Object.fromEntries(new URLSearchParams(queryParams)));
+    const data = await api.get<{ message?: string }>("/servers/probe", params);
     setProbeResult(data?.message || "Ошибка проверки");
   };
 
   const handleAddServer = async () => {
     const data = await api.post<{ id?: number }>("/servers/servers", newServer);
-
     if (data.id) {
       fetchServers();
       setNewServer({
@@ -250,39 +230,32 @@ const OpcServerPage: React.FC = () => {
     } catch {
       alert("Ошибка удаления. Возможно, есть связанные задачи.");
     }
-
   };
 
-  // --- Сканирование сети ---
   const startScan = () => {
     setScanLog([]);
     setFoundServers([]);
     setIsScanning(true);
     const base = API_BASE ? API_BASE.replace(/\/$/, "") : "";
-    const eventSource = new EventSource(
+    const es = new EventSource(
       `${base}/servers/netscan_stream?ip_start=${encodeURIComponent(ipStart)}&ip_end=${encodeURIComponent(ipEnd)}&ports=4840,4841,4849`
     );
-
-    eventSource.onmessage = (event) => {
+    es.onmessage = (event) => {
       const msg = JSON.parse(event.data);
-      if (msg.type === "log") {
-        setScanLog((prev) => [...prev, `Проверяю ${msg.ip}:${msg.port}...`]);
-      } else if (msg.type === "found") {
-        setFoundServers((prev) => [...prev, msg.url]);
-        setScanLog((prev) => [...prev, `→ Найден OPC UA сервер: ${msg.url}`]);
+      if (msg.type === "log") setScanLog((p) => [...p, `Проверяю ${msg.ip}:${msg.port}...`]);
+      else if (msg.type === "found") {
+        setFoundServers((p) => [...p, msg.url]);
+        setScanLog((p) => [...p, `→ Найден OPC UA сервер: ${msg.url}`]);
       } else if (msg.type === "finish") {
-        setScanLog((prev) => [
-          ...prev,
-          `Сканирование завершено. Найдено: ${msg.found.length}`,
-        ]);
+        setScanLog((p) => [...p, `Сканирование завершено. Найдено: ${msg.found.length}`]);
         setIsScanning(false);
-        eventSource.close();
+        es.close();
       }
     };
-    eventSource.onerror = () => {
-      setScanLog((prev) => [...prev, "Ошибка соединения."]);
+    es.onerror = () => {
+      setScanLog((p) => [...p, "Ошибка соединения."]);
       setIsScanning(false);
-      eventSource.close();
+      es.close();
     };
   };
 
@@ -290,44 +263,30 @@ const OpcServerPage: React.FC = () => {
     setNewServer((s) => ({ ...s, endpoint_url: url }));
   };
 
-  const getLeafKeys = (nodes: TreeNode[], checkedKeys: React.Key[]): string[] => {
-    let result: string[] = [];
-    nodes.forEach((node) => {
-      if (node.isLeaf && checkedKeys.includes(node.key)) {
-        result.push(node.key as string);
-      }
-      if (node.children) {
-        result = result.concat(getLeafKeys(node.children, checkedKeys));
-      }
+  const getLeafKeys = (nodes: TreeNode[], checked: React.Key[]): string[] => {
+    let res: string[] = [];
+    nodes.forEach((n) => {
+      if (n.isLeaf && checked.includes(n.key)) res.push(n.key as string);
+      if (n.children) res = res.concat(getLeafKeys(n.children, checked));
     });
-    return result;
+    return res;
   };
 
-  // --- Кнопка "Запустить опрос" выбранных тегов
   const handleStartSelectedPolling = async () => {
-    if (!selectedServer) {
-      alert("Сначала выберите сервер!");
-      return;
-    }
-    if (!checkedKeys.length) {
-      alert("Выберите хотя бы один тег (чекбокс) для опроса.");
-      return;
-    }
+    if (!selectedServer) return alert("Сначала выберите сервер!");
+    if (!checkedKeys.length) return alert("Выберите хотя бы один тег (Variable).");
+
     const leafKeys = getLeafKeys(treeData, checkedKeys);
     let selectedTags: OpcTag[] = [];
-    const gatherTags = (nodes: TreeNode[]) => {
-      nodes.forEach((node) => {
-        if (leafKeys.includes(node.key as string) && node.data && node.isLeaf) {
-          selectedTags.push(node.data);
-        }
-        if (node.children) gatherTags(node.children);
+    const gather = (nodes: TreeNode[]) => {
+      nodes.forEach((n) => {
+        if (leafKeys.includes(n.key as string) && n.data && n.isLeaf) selectedTags.push(n.data);
+        if (n.children) gather(n.children);
       });
     };
-    gatherTags(treeData);
-    if (!selectedTags.length) {
-      alert("Выберите хотя бы один тег Variable для опроса (чекбокс должен стоять на переменных, а не на папках)!");
-      return;
-    }
+    gather(treeData);
+    if (!selectedTags.length) return alert("Нет выбранных переменных для опроса.");
+
     try {
       const data = await api.post<{ ok: boolean; task_id?: number; message?: string }>(
         "/polling/start_selected_polling",
@@ -343,8 +302,6 @@ const OpcServerPage: React.FC = () => {
           interval_id: selectedIntervalId,
         }
       );
-
-
       if (data.ok) {
         alert(`Опрос выбранных тегов запущен (task_id=${data.task_id})`);
         setRecording(true);
@@ -356,21 +313,13 @@ const OpcServerPage: React.FC = () => {
     }
   };
 
-  // --- Опрос всей ветки (использует collectLeafTagsByKey) ---
   const handleStartPollingForBranch = async () => {
-    if (!selectedServer) {
-      alert("Сначала выберите сервер!");
-      return;
-    }
-    if (!selectedNodeKey) {
-      alert("Выделите узел (папку или любой объект в дереве) для опроса всей ветки");
-      return;
-    }
+    if (!selectedServer) return alert("Сначала выберите сервер!");
+    if (!selectedNodeKey) return alert("Выделите узел для опроса всей ветки");
+
     const tagsInBranch = collectLeafTagsByKey(treeData, selectedNodeKey);
-    if (!tagsInBranch.length) {
-      alert("В этой ветке не найдено ни одной переменной (Variable)");
-      return;
-    }
+    if (!tagsInBranch.length) return alert("В этой ветке нет переменных (Variable).");
+
     try {
       const data = await api.post<{ ok: boolean; task_id?: number; message?: string }>(
         "/polling/start_selected_polling",
@@ -386,7 +335,6 @@ const OpcServerPage: React.FC = () => {
           interval_id: selectedIntervalId,
         }
       );
-
       if (data.ok) {
         alert(`Опрос всей ветки запущен (task_id=${data.task_id})`);
         setRecording(true);

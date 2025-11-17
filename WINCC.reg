@@ -1,0 +1,13 @@
+Windows Registry Editor Version 5.00
+
+; ===== Включаем режим IE11 (emulation 11001 = 0x2AF9) для WinCC Runtime =====
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION]
+"CCPtmRTServer.exe"=dword:00002af9
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION]
+"CCPtmRTServer.exe"=dword:00002af9
+
+; (опционально) Отключаем списки EnterpriseMode для старых IE-режимов
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Internet Explorer\Main\EnterpriseMode]
+"SiteList"=""

@@ -70,6 +70,11 @@ const OpcTagsPage: React.FC = () => {
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const api = useApi();
   // Загрузка серверов и интервалов при инициализации
+   // =========================
+  // ЛОГИКА
+  // =========================
+
+  // загрузка серверов и интервалов
   useEffect(() => {
     api.get<OpcServer[]>("/servers/servers").then((data) => {
       setServers(data || []);
@@ -82,22 +87,25 @@ const OpcTagsPage: React.FC = () => {
     });
   }, []);
 
-
+  // формирование query-параметров
   function makeQueryParams(forPage = page) {
     const params = new URLSearchParams();
     params.set("page", forPage.toString());
     params.set("page_size", PAGE_SIZE.toString());
+    if (selectedServer?.id) params.set("server_id", String(selectedServer.id));
     Object.entries(filters).forEach(([k, v]) => {
       if (v.trim() !== "") params.set(k, v);
     });
     return params;
   }
 
+  // получение списка тегов с фильтрами
   function fetchTags(newPage = page) {
     setLoading(true);
     const params = makeQueryParams(newPage);
     const q = Object.fromEntries(params as any);
-    api.get<{ items: OpcTag[]; total: number }>("/tags/all-tags", q)
+    api
+      .get<{ items: OpcTag[]; total: number }>("/opctags/list", q)
       .then((data) => {
         setTags(data?.items || []);
         setTotal(data?.total || 0);
@@ -108,8 +116,7 @@ const OpcTagsPage: React.FC = () => {
       .finally(() => setLoading(false));
   }
 
-
-  // --- ПРОБА СОЕДИНЕНИЯ ---
+  // проверка соединения с сервером
   const probePlc = () => {
     if (!selectedServer) {
       console.warn("[OpcTagsPage] Нет выбранного сервера для probePlc");
@@ -123,37 +130,37 @@ const OpcTagsPage: React.FC = () => {
       securityPolicy: selectedServer.securityPolicy || "Basic256Sha256",
       securityMode: selectedServer.securityMode || "Sign",
     }).toString();
-    api.get<{ ok?: boolean }>("/servers/probe", Object.fromEntries(new URLSearchParams(queryParams)))
+    api
+      .get<{ ok?: boolean }>(
+        "/servers/probe",
+        Object.fromEntries(new URLSearchParams(queryParams))
+      )
       .then((data) => setPlcStatus(data?.ok ? "online" : "offline"))
       .catch(() => setPlcStatus("offline"));
   };
 
+  // обновление живых значений
   function fetchLiveValues(tagIds: number[]) {
-    if (!selectedServer || tagIds.length === 0) {
-      return;
-    }
+    if (!selectedServer || tagIds.length === 0) return;
     setLoading(true);
-    api.post<{ ok: boolean; values?: Record<string, any> }>("/tags/live", {
-      tag_ids: tagIds,
-      server_id: selectedServer.id,
-    })
+    api
+      .post<{ ok: boolean; values?: Record<string, any> }>("/tags/live", {
+        tag_ids: tagIds,
+        server_id: selectedServer.id,
+      })
       .then((data) => {
         if (data?.ok) setLiveValues(data.values || {});
         else setLiveValues({});
       })
       .catch(() => setLiveValues({}))
       .finally(() => setLoading(false));
-
   }
 
+  // изменение фильтров
   function handleFilterChange(field: keyof TagFilters, value: string) {
-    setFilters(f => ({ ...f, [field]: value }));
-
-    // Debounce-поиск
+    setFilters((f) => ({ ...f, [field]: value }));
     if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-    debounceTimeout.current = setTimeout(() => {
-      fetchTags(1);
-    }, 300); // 300мс задержка, можно больше/меньше
+    debounceTimeout.current = setTimeout(() => fetchTags(1), 300);
   }
 
   function handleFilterKeyDown(e: React.KeyboardEvent) {
@@ -165,27 +172,30 @@ const OpcTagsPage: React.FC = () => {
     setTimeout(() => fetchTags(1), 100);
   }
 
+  // обновление описания тега
   async function handleDescriptionChange(tag: OpcTag, newDesc: string) {
     try {
-      await api.put(`/tags/${tag.id}`, { description: newDesc });
-
-      setTags(ts => ts.map(t => (t.id === tag.id ? { ...t, description: newDesc } : t)));
+      await api.put(`/opctags/${tag.id}`, { description: newDesc });
+      setTags((ts) =>
+        ts.map((t) => (t.id === tag.id ? { ...t, description: newDesc } : t))
+      );
     } catch (e) {
       console.error("[OpcTagsPage] Ошибка обновления описания тега:", e);
     }
   }
 
+  // удаление тега
   async function handleDelete(id: number) {
     if (!window.confirm("Удалить этот тег?")) return;
     try {
-      await api.del(`/tags/${id}`);
-
+      await api.del(`/opctags/${id}`);
       fetchTags();
     } catch (e) {
       console.error("[OpcTagsPage] Ошибка удаления тега:", e);
     }
   }
 
+  // запуск опроса
   async function handleStartPolling() {
     if (!checkedTagIds.length || !selectedServer) {
       alert("Выберите сервер и хотя бы один тег для опроса.");
@@ -217,10 +227,20 @@ const OpcTagsPage: React.FC = () => {
 
       if (data.ok) {
         if (data.added_tags && data.added_tags.length > 0) {
-          alert(`Теги добавлены к существующей задаче (task_id=${data.task_id}).\nДобавлено: ${data.added_tags.length}`);
-        } else if (data.message && data.message.includes("уже есть в текущей задаче")) {
-          alert("Все выбранные теги уже присутствуют в активной задаче — ничего не изменено.");
-        } else if (data.message && data.message.includes("Создана новая задача")) {
+          alert(
+            `Теги добавлены к существующей задаче (task_id=${data.task_id}).\nДобавлено: ${data.added_tags.length}`
+          );
+        } else if (
+          data.message &&
+          data.message.includes("уже есть в текущей задаче")
+        ) {
+          alert(
+            "Все выбранные теги уже присутствуют в активной задаче — ничего не изменено."
+          );
+        } else if (
+          data.message &&
+          data.message.includes("Создана новая задача")
+        ) {
           alert(`Создана новая задача опроса! (task_id=${data.task_id})`);
         } else {
           alert("Операция завершена: " + (data.message || ""));
@@ -233,7 +253,7 @@ const OpcTagsPage: React.FC = () => {
     }
   }
 
-  // Основная подгрузка тегов при изменении сервера
+  // подгрузка при смене сервера
   useEffect(() => {
     if (selectedServer) {
       probePlc();
@@ -242,22 +262,29 @@ const OpcTagsPage: React.FC = () => {
     // eslint-disable-next-line
   }, [selectedServer]);
 
+  // автообновление Live-значений
   useEffect(() => {
     if (!autoRefresh) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       return;
     }
-    const tagIds = tags.map(t => t.id);
+    const tagIds = tags.map((t) => t.id);
     fetchLiveValues(tagIds);
-    intervalRef.current = window.setInterval(() => fetchLiveValues(tagIds), 10000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    intervalRef.current = window.setInterval(
+      () => fetchLiveValues(tagIds),
+      10000
+    );
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
     // eslint-disable-next-line
   }, [autoRefresh, tags, selectedServer]);
 
-  // Отключение автообновления при уходе со страницы
+  // очистка при размонтировании
   useEffect(() => () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
   }, []);
+
 
 
 

@@ -7,7 +7,7 @@ REM --- АКТИВАЦИЯ PYTHON ОКРУЖЕНИЯ ---
 call backend\venv\Scripts\activate.bat
 
 REM --- ЗАПУСК FASTAPI (бэкенд) ---
-start "FastAPI" cmd /k cd /d "%ROOT%backend" ^&^& uvicorn app.main:app --host 0.0.0.0 --port 8000
+start "FastAPI" cmd /k cd /d "%ROOT%backend" ^&^& uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 REM --- ЗАДЕРЖКА 2 секунды ---
 timeout /t 2

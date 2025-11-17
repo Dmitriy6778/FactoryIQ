@@ -70,61 +70,76 @@ def _db():
     return pyodbc.connect(get_conn_str())
 
 
-@router.put("/templates/{template_id}/style")
-def set_template_style(template_id: int, payload: SetTemplateStyleDTO):
+# ==== ЭНДПОИНТЫ ====
+
+# 1. Создание шаблона отчёта
+# reports.py
+
+from .auth import get_current_user   # или твой провайдер юзера
+
+@router.post("/templates/create")
+def create_report_template(
+    payload: ReportTemplateCreate,
+    user = Depends(get_current_user)  # <-- берём текущего юзера из JWT
+):
     """
-    Привязать сохранённый стиль к шаблону (ReportTemplates.StyleId).
+    Создаёт шаблон отчёта и его теги от имени текущего пользователя.
+    FK на Users не ломается, потому что пишем реальный user_id.
     """
     try:
         with _db() as conn:
             cur = conn.cursor()
-            # убедимся, что стиль существует
-            cur.execute("SELECT 1 FROM ReportStyles WHERE Id=?", payload.style_id)
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Стиль не найден")
 
-            # убедимся, что шаблон существует
-            cur.execute("SELECT 1 FROM ReportTemplates WHERE Id=?", template_id)
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Шаблон не найден")
+            user_id = int(user["id"]) if user and user.get("id") else None  # если колонка UserId допускает NULL — тоже ок
 
-            cur.execute("UPDATE ReportTemplates SET StyleId=? WHERE Id=?", payload.style_id, template_id)
+            # ВАЖНО: используем OUTPUT INSERTED.Id вместо @@IDENTITY
+            cur.execute(
+                """
+                INSERT INTO ReportTemplates
+                (UserId, Name, Description, ReportType, PeriodType, IsShared, AutoSchedule, TargetChannel, StyleId)
+                OUTPUT INSERTED.Id
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                user_id,
+                payload.name,
+                payload.description,
+                payload.report_type,
+                payload.period_type,
+                int(payload.is_shared or 0),
+                int(payload.auto_schedule or 0),
+                payload.target_channel,
+                payload.style_id,
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=500, detail="Insert ReportTemplates failed")
+            template_id = int(row[0])
+
+            # теги
+            for idx, tag in enumerate(payload.tags):
+                cur.execute(
+                    """
+                    INSERT INTO ReportTemplateTags
+                    (TemplateId, TagId, TagType, Aggregate, IntervalMinutes, DisplayOrder)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    template_id,
+                    tag.tag_id,
+                    tag.tag_type,
+                    (tag.aggregate or None),   # Aggregate может быть NULL
+                    tag.interval_minutes,
+                    idx,
+                )
+
             conn.commit()
-            return {"ok": True}
+            return {"ok": True, "template_id": template_id}
+
     except HTTPException:
         raise
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
 
-# ==== ЭНДПОИНТЫ ====
-
-# 1. Создание шаблона отчёта
-@router.post("/templates/create")
-def create_report_template(payload: ReportTemplateCreate):
-    try:
-        with _db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO ReportTemplates
-                (UserId, Name, Description, ReportType, PeriodType, IsShared, AutoSchedule, TargetChannel, StyleId)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            1, payload.name, payload.description, payload.report_type, payload.period_type,
-            int(payload.is_shared), int(payload.auto_schedule), payload.target_channel, payload.style_id)
-
-            template_id = cur.execute("SELECT @@IDENTITY").fetchval()
-            # теги
-            for idx, tag in enumerate(payload.tags):
-                cur.execute("""
-                    INSERT INTO ReportTemplateTags (TemplateId, TagId, TagType, Aggregate, IntervalMinutes, DisplayOrder)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, template_id, tag.tag_id, tag.tag_type, tag.aggregate, tag.interval_minutes, idx)
-
-            conn.commit()
-            return {"ok": True, "template_id": template_id}
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=str(ex))
 
 
 # 2. Получение всех шаблонов
@@ -132,8 +147,6 @@ def create_report_template(payload: ReportTemplateCreate):
 def get_report_templates():
     try:
         with _db() as conn:
-            cur = conn.cursor()
-            conn = pyodbc.connect(get_conn_str())
             cur = conn.cursor()
             cur.execute("""
                 SELECT Id, Name, Description, ReportType, PeriodType, IsShared, AutoSchedule, TargetChannel, StyleId
@@ -150,52 +163,73 @@ def get_report_templates():
                     "is_shared": bool(row.IsShared),
                     "auto_schedule": bool(row.AutoSchedule),
                     "target_channel": row.TargetChannel,
-                    "style_id": getattr(row, "StyleId", None),  # <<<
+                    "style_id": getattr(row, "StyleId", None),
                 })
             return {"ok": True, "templates": templates}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
-
+# app/routers/reports.py
 @router.get("/templates/{template_id}")
 def get_report_template(template_id: int):
     try:
         with _db() as conn:
             cur = conn.cursor()
+
             cur.execute("SELECT * FROM ReportTemplates WHERE Id = ?", template_id)
-            row = cur.fetchone()
-            if not row:
+            tpl = cur.fetchone()
+            if not tpl:
                 raise HTTPException(status_code=404, detail="Template not found")
 
+            # ВАЖНО: в OpcTags НЕТ столбца Name — используем BrowseName
             cur.execute("""
-                SELECT TagId, TagType, Aggregate, IntervalMinutes, DisplayOrder
-                FROM ReportTemplateTags WHERE TemplateId = ?
+                SELECT
+                    t.TagId            AS TagId,
+                    t.TagType          AS TagType,
+                    t.Aggregate        AS Aggregate,
+                    t.IntervalMinutes  AS IntervalMinutes,
+                    t.DisplayOrder     AS DisplayOrder,
+                    ot.BrowseName      AS BrowseName,
+                    ot.BrowseName      AS Name,        -- совместимость с фронтом
+                    ot.Description     AS Description
+                FROM ReportTemplateTags t
+                LEFT JOIN OpcTags ot ON ot.Id = t.TagId
+                WHERE t.TemplateId = ?
+                ORDER BY t.DisplayOrder
             """, template_id)
-            tags = [{
-                "tag_id": t.TagId,
-                "tag_type": t.TagType,
-                "aggregate": t.Aggregate,
-                "interval_minutes": t.IntervalMinutes,
-                "display_order": t.DisplayOrder,
-            } for t in cur.fetchall()]
 
-            return {
-                "ok": True,
-                "template": {
-                    "id": row.Id,
-                    "name": row.Name,
-                    "description": row.Description,
-                    "report_type": row.ReportType,
-                    "period_type": row.PeriodType,
-                    "is_shared": bool(row.IsShared),
-                    "auto_schedule": bool(row.AutoSchedule),
-                    "target_channel": row.TargetChannel,
-                    "style_id": getattr(row, "StyleId", None),  # <<<
-                    "tags": tags,
-                }
-            }
+            cols = [c[0] for c in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+            tags = [{
+                "tag_id": r["TagId"],
+                "tag_type": r["TagType"],
+                "aggregate": r["Aggregate"],
+                "interval_minutes": r["IntervalMinutes"],
+                "display_order": r["DisplayOrder"],
+                "browse_name": r.get("BrowseName"),
+                "name": r.get("Name"),                # = BrowseName
+                "description": r.get("Description"),
+            } for r in rows]
+
+            return {"ok": True, "template": {
+                "id": tpl.Id,
+                "name": tpl.Name,
+                "description": tpl.Description,
+                "report_type": tpl.ReportType,
+                "period_type": tpl.PeriodType,
+                "is_shared": bool(tpl.IsShared),
+                "auto_schedule": bool(tpl.AutoSchedule),
+                "target_channel": tpl.TargetChannel,
+                "style_id": getattr(tpl, "StyleId", None),
+                "tags": tags,
+            }}
+    except HTTPException:
+        raise
     except Exception as ex:
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(ex))
+
 
 # 4. Удаление шаблона
 @router.delete("/templates/{template_id}")
