@@ -28,7 +28,9 @@ param(
   [string]$SvcApi   = 'factoryiq-api',
   [string]$SvcOpc   = 'factoryiq-opc',
   [string]$SvcRpt   = 'factoryiq-reports',
-  [string]$SvcWdg   = 'factoryiq-watchdog'   # NEW: watchdog service
+  [string]$SvcWdg   = 'factoryiq-watchdog',  
+  [string]$SvcWeigh = 'factoryiq-weighbridge'
+
 )
 
 $ErrorActionPreference = 'Stop'
@@ -311,6 +313,7 @@ function Do-Services {
   & nssm start $SvcApi | Out-Null
   Ok 'Service ready: factoryiq-api'
 
+
   # OPC worker
   Remove-Service-Force -Name $SvcOpc
   & nssm install $SvcOpc $VenvPython 'app\opc_polling_worker_sync.py' | Out-Null
@@ -324,6 +327,21 @@ function Do-Services {
   & nssm set $SvcOpc Start SERVICE_AUTO_START | Out-Null
   & nssm start $SvcOpc | Out-Null
   Ok 'Service ready: factoryiq-opc'
+
+  # Weighbridge (весовая) worker
+  Remove-Service-Force -Name $SvcWeigh
+  & nssm install $SvcWeigh $VenvPython 'app\weighbridge_sync.py' | Out-Null
+  & nssm set $SvcWeigh AppDirectory $BackProd | Out-Null
+  & nssm set $SvcWeigh AppStdout (Join-Path $logs 'weighbridge.out.log') | Out-Null
+  & nssm set $SvcWeigh AppStderr (Join-Path $logs 'weighbridge.err.log') | Out-Null
+  & nssm set $SvcWeigh AppRotateFiles 1 | Out-Null
+  & nssm set $SvcWeigh AppRotateOnline 1 | Out-Null
+  & nssm set $SvcWeigh AppRotateBytes 10485760 | Out-Null
+  & nssm set $SvcWeigh AppEnvironmentExtra ("PYTHONUNBUFFERED=1","PYTHONPATH=$BackProd") | Out-Null
+  & nssm set $SvcWeigh Start SERVICE_AUTO_START | Out-Null
+  & nssm start $SvcWeigh | Out-Null
+  Ok 'Service ready: factoryiq-weighbridge'
+
 
   # Reports worker
   Remove-Service-Force -Name $SvcRpt
@@ -393,9 +411,10 @@ Ok "Service ready: $SvcCaddy"
 
   Ok 'Service ready: factoryiq-watchdog'
 
-  Get-Service $SvcApi,$SvcOpc,$SvcRpt,$SvcWdg | Select Name,Status,StartType | Format-Table -AutoSize
+  Get-Service $SvcApi,$SvcOpc,$SvcRpt,$SvcWeigh,$SvcWdg | Select Name,Status,StartType | Format-Table -AutoSize
   Get-Service $SvcCaddy | Select Name,Status,StartType | Format-Table -AutoSize
 }
+
 
 # ---------------- 5) Verify ----------------
 function Do-Verify {

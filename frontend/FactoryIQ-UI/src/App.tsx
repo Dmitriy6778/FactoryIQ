@@ -22,24 +22,55 @@ import ServiceMonitorPage from "./pages/ServiceMonitorPage";
 import SetupWizard from "./components/Auth/SetupWizard";
 import MaintenanceLogPage from "./pages/MaintenanceLogPage";
 
+// 🆕 страница пользовательских экранов
+import UserScreensPage from "./pages/UserScreensPage";
+import UserScreenEditor from "./pages/UserScreenEditor";
+import WeighbridgePage from "./pages/WeighbridgePage";
 
 const App: React.FC = () => (
   <Routes>
     {/* ----------- Публичные маршруты ----------- */}
     <Route path="/setup" element={<SetupWizard />} />
     <Route path="/login" element={<LoginPage />} />
-<Route path="/maintenance/ui" element={<MaintenanceLogPage/>} />
-
-
+    <Route path="/maintenance/ui" element={<MaintenanceLogPage />} />
+<Route path="/weighbridge" element={<WeighbridgePage />} />
     {/* ----------- Защищённые маршруты ----------- */}
     <Route
       path="/"
       element={
-        <ProtectedRoute anyOf={["Servers.View", "Polling.View", "Tags.View", "Analytics.View"]}>
+        <ProtectedRoute
+          anyOf={[
+            "Servers.View",
+            "Polling.View",
+            "Tags.View",
+            "Analytics.View",
+            // 🆕 даём доступ на главную и тем, у кого только пользовательские экраны
+            "UserScreens.View",
+            "UserScreens.Manage",
+          ]}
+        >
           <StartPage />
         </ProtectedRoute>
       }
     />
+
+    {/* 🆕 Пользовательские экраны */}
+    <Route
+      path="/user-screens"
+      element={
+        <ProtectedRoute anyOf={["UserScreens.View", "UserScreens.Manage", "Admin"]}>
+          <UserScreensPage />
+        </ProtectedRoute>
+      }
+    />
+<Route
+  path="/user-screens/:screenId"
+  element={
+    <ProtectedRoute anyOf={["UserScreens.View", "UserScreens.Manage", "Admin"]}>
+      <UserScreenEditor />
+    </ProtectedRoute>
+  }
+/>
 
     {/* Мониторинг служб / воркеров */}
     <Route
@@ -78,7 +109,7 @@ const App: React.FC = () => (
       }
     />
 
-    {/* Управление пользователями — теперь тоже защищено */}
+    {/* Управление пользователями */}
     <Route
       path="/settings/users"
       element={
@@ -132,9 +163,6 @@ const App: React.FC = () => (
         </ProtectedRoute>
       }
     />
-
-  
-
 
     {/* ----------- fallback 404 ----------- */}
     <Route

@@ -17,7 +17,7 @@ type AuthState = {
     token: string | null;
 
     // actions
-    login: (params: { username: string; email?: string }) => Promise<void>;
+    login: (params: { username: string; email?: string; password?: string }) => Promise<void>;
     logout: () => void;
     fetchMe: () => Promise<void>;
 
@@ -102,18 +102,25 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         }
     }, [token, saveToken]);
 
-    const login = useCallback(
-        async ({ username, email }: { username: string; email?: string }) => {
-            const data = await apiFetch<{ access_token: string }>(
-                "/auth/login",
-                { method: "POST", body: JSON.stringify({ username, email }) },
-                null
-            );
-            saveToken(data.access_token);
-            await fetchMe();
-        },
-        [fetchMe, saveToken]
-    );
+   const login = useCallback(
+    async ({ username, email, password }: { username: string; email?: string; password?: string }) => {
+        const data = await apiFetch<{ access_token: string }>(
+            "/auth/login",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    username,
+                    email,
+                    password: password || undefined,
+                }),
+            },
+            null
+        );
+        saveToken(data.access_token);
+        await fetchMe();
+    },
+    [fetchMe, saveToken]
+);
 
     const logout = useCallback(() => {
         saveToken(null);

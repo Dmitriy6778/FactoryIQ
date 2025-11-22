@@ -479,14 +479,22 @@ const mapped: Task[] = items.map((t: any) => ({
   };
 
   // ВАЖНО: приклеиваем стиль к payload, чтобы бэк применил text_template/chart_title
-  const style = parseStyleOverride((record as any).style_override);
-  if (style?.text_template) base.text_template = style.text_template;
-  if (style?.chart_kind)     base.chart = style.chart_kind;
-  if (style?.expand_weekly_shifts) base.expand_weekly_shifts = true; // бэк поймет/проигнорирует
+  const style = parseStyleOverride((record as any).style_override) || {};
+  // ⬇️ передаём именно style_override — бэк это ждёт
+base.style_override = {
+  chart_title: style.chart_title,
+  chart_kind: style.chart_kind,
+  text_template: style.text_template,
+  expand_weekly_shifts: !!style.expand_weekly_shifts,
+  description_overrides: style.description_overrides,
 
-  // вернём и заголовок для модалки
-  (base as any).__title = style?.chart_title || "Предпросмотр отчёта";
+  // NEW: недельные опции
+  weekly_y_mode: style.weekly_y_mode,       // "delta" | "cum"
+  weekly_divisor: style.weekly_divisor,     // число или строка
+  weekly_unit: style.weekly_unit,           // подпись
+};
 
+  (base as any).__title = style.chart_title || "Предпросмотр отчёта";
   return base;
 };
   // ====== обработчики ======
@@ -583,138 +591,111 @@ const prepared: any = {
   );
 
   const handleAddTask = useCallback(
-    async (values: any) => {
-      setLoading(true);
-      try {
-        const {
-          template_id,
-          period_type,
-          time_of_day,
-          target_type,
-          target_value,
-          send_format,
-          aggregation_type,
-          trend_avg_seconds,
-        } = values;
+  async (values: any) => {
+    setLoading(true);
+    try {
+      const {
+        template_id,
+        period_type,
+        time_of_day,
+        target_type,
+        target_value,
+        send_format,
+        aggregation_type,
+        trend_avg_seconds,
+      } = values;
 
-        const aggValue = Array.isArray(aggregation_type)
-          ? aggregation_type.join(",")
-          : aggregation_type || null;
+      const aggValue = Array.isArray(aggregation_type)
+        ? aggregation_type.join(",")
+        : aggregation_type || null;
 
-        const windowMinutes = windowByPeriod(period_type) ?? null;
+      const windowMinutes = windowByPeriod(period_type) ?? null;
 
-        if (period_type === "shift") {
-          // создаём две записи: 08:00 и 20:00
-          const shiftTimes = ["08:00:00", "20:00:00"];
-          const results: any[] = [];
-          for (const time of shiftTimes) {
-            const body: any = {
-              template_id,
-              period_type,
-              time_of_day: time,
-              target_type,
-              target_value: String(target_value),
-              aggregation_type: aggValue,
-              send_format,
-            };
-            results.push(await api.post(API.SCHEDULE_CREATE, body));
-          }
-          if (results.every((r: any) => r?.ok)) {
-            message.success("Задания по сменам успешно созданы");
-            setModalOpen(false);
-            form.resetFields();
-            await loadTasks();
-          } else if (
-            results.some((r: any) =>
-              String(r?.detail || "").includes("существует")
-            )
-          ) {
-            message.warning("Некоторые сменные расписания уже существуют");
-          } else {
-            message.error("Ошибка при создании одного из сменных расписаний");
-          }
-
-          } else if (period_type === "weekly") {
-        // ← НОВОЕ: для «Недели» создаём две задачи 08:00 и 20:00
-        const times = ["08:00:00", "20:00:00"];
+      if (period_type === "shift") {
+        // создаём две записи: 08:00 и 20:00 (смены оставляем как есть)
+        const shiftTimes = ["08:00:00", "20:00:00"];
         const results: any[] = [];
-        for (const t of times) {
-          const body: any = {
-            template_id,
-            period_type: "weekly",
-            time_of_day: t,                 // фиксированное время
-            target_type,
-            target_value: String(target_value),
-            aggregation_type: aggValue,
-            send_format,
-          };
-          // минутные поля не актуальны для weekly, поэтому не добавляем
-          results.push(await api.post(API.SCHEDULE_CREATE, body));
-        }
-
-        if (results.every((r: any) => r?.ok)) {
-          message.success("Недельные задания на 08:00 и 20:00 созданы");
-          setModalOpen(false);
-          form.resetFields();
-          await loadTasks();
-        } else if (results.some((r: any) => String(r?.detail || "").includes("существует"))) {
-          message.warning("Некоторые недельные задания уже существуют");
-          await loadTasks();
-        } else {
-          message.error("Ошибка при создании недельных заданий");
-        }
-      } else {
-          let timeStr = "";
-          if (period_type === "daily" || period_type === "once") {
-            timeStr =
-              normalizeTimeStr(
-                typeof time_of_day === "string" ? time_of_day : ""
-              ) || "08:00:00";
-          } else if (period_type === "hourly" || isMinutePeriod(period_type)) {
-            timeStr = "00:00:00";
-          } else {
-            timeStr = normalizeTimeStr(time_of_day) || "08:00:00";
-          }
-
+        for (const time of shiftTimes) {
           const body: any = {
             template_id,
             period_type,
-            time_of_day: timeStr,
+            time_of_day: time,
             target_type,
             target_value: String(target_value),
             aggregation_type: aggValue,
             send_format,
           };
-
-          if (isMinutePeriod(period_type)) {
-            body.window_minutes = Number(windowMinutes);
-            body.avg_seconds = Number.isFinite(+trend_avg_seconds)
-              ? Number(trend_avg_seconds)
-              : 10;
-          }
-
-          const res = await api.post(API.SCHEDULE_CREATE, body);
-          if (
-            res?.status === 409 ||
-            String((res as any)?.detail || "").includes("существует")
-          ) {
-            message.warning("Такое расписание уже существует");
-          } else if ((res as any)?.ok === false) {
-            message.error("Ошибка при добавлении задания");
-          } else {
-            message.success("Задание добавлено");
-            setModalOpen(false);
-            form.resetFields();
-            await loadTasks();
-          }
+          results.push(await api.post(API.SCHEDULE_CREATE, body));
         }
-      } catch (e: any) {
-        message.error(`Ошибка при добавлении задания: ${e?.message || e}`);
+        if (results.every((r: any) => r?.ok)) {
+          message.success("Задания по сменам успешно созданы");
+          setModalOpen(false);
+          form.resetFields();
+          await loadTasks();
+        } else if (
+          results.some((r: any) =>
+            String(r?.detail || "").includes("существует")
+          )
+        ) {
+          message.warning("Некоторые сменные расписания уже существуют");
+        } else {
+          message.error("Ошибка при создании одного из сменных расписаний");
+        }
+      } else {
+        // ВСЕ остальные периоды, включая weekly, идут сюда
+        let timeStr = "";
+        if (period_type === "daily" || period_type === "once") {
+          timeStr =
+            normalizeTimeStr(
+              typeof time_of_day === "string" ? time_of_day : ""
+            ) || "08:00:00";
+        } else if (period_type === "hourly" || isMinutePeriod(period_type)) {
+          timeStr = "00:00:00";
+        } else {
+          // weekly / monthly / и др. — привязываем к 08:00:00, если время не задано
+          timeStr = normalizeTimeStr(time_of_day) || "08:00:00";
+        }
+
+        const body: any = {
+          template_id,
+          period_type,
+          time_of_day: timeStr,
+          target_type,
+          target_value: String(target_value),
+          aggregation_type: aggValue,
+          send_format,
+        };
+
+        if (isMinutePeriod(period_type)) {
+          body.window_minutes = Number(windowMinutes);
+          body.avg_seconds = Number.isFinite(+trend_avg_seconds)
+            ? Number(trend_avg_seconds)
+            : 10;
+        }
+
+        const res = await api.post(API.SCHEDULE_CREATE, body);
+        if (
+          res?.status === 409 ||
+          String((res as any)?.detail || "").includes("существует")
+        ) {
+          message.warning("Такое расписание уже существует");
+        } else if ((res as any)?.ok === false) {
+          message.error("Ошибка при добавлении задания");
+        } else {
+          message.success("Задание добавлено");
+          setModalOpen(false);
+          form.resetFields();
+          await loadTasks();
+        }
       }
-      setLoading(false);
-    },
-    [api, form, loadTasks]
-  );
+    } catch (e: any) {
+      message.error(`Ошибка при добавлении задания: ${e?.message || e}`);
+    }
+    setLoading(false);
+  },
+  [api, form, loadTasks]
+);
+
 
 
   // PATCH: handleRunNow — берём meta с бэка, формируем proc/params и отправляем в /telegram2/send
@@ -724,91 +705,70 @@ const handleRunNow = useCallback(
       const row = tasks.find((t) => t.id === id);
       if (!row) return message.warning("Задание не найдено");
 
-      // 1) meta по шаблону
-      const meta = await api.get<any>(`${TG}/templates/${row.template_id}/preview-meta`);
-      const metaOk = meta?.ok ? { ...meta, ok: undefined } : meta;
+      const isMinute = row.period_type === "every_5m" ||
+                       row.period_type === "every_10m" ||
+                       row.period_type === "every_30m";
+      const isHourly = row.period_type === "hourly";
 
-      let proc = metaOk.proc as string;
-      let params: Record<string, any> = { ...(metaOk.params || {}) };
-      let map_x = metaOk.map_x || "Timestamp";
-      let map_y = metaOk.map_y || "Value";
-      let map_series = metaOk.map_series ?? "TagName";
-      let unit = metaOk.unit ?? null;
-
-      // 2) специальные случаи
-      if (row.period_type === "weekly") {
-  const now = new Date();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // Пн текущей недели
-  const yyyy = monday.getFullYear();
-  const mm = String(monday.getMonth() + 1).padStart(2, "0");
-  const dd = String(monday.getDate()).padStart(2, "0");
-  const weekMonday = `${yyyy}-${mm}-${dd}`;
-
-  proc = "dbo.sp_Telegram_WeeklyShiftCumulative";
-  params = { "@week_monday": weekMonday }; // ← только один параметр
-
-  map_x = "Period";
-  map_y = "CumValue";
-  map_series = "TagName";
-  unit = null;
-}
-
-      // 3) стиль (override)
+      // стиль
       const style = parseStyleOverride(row.style_override);
-      const chart =
+      const chartKind =
         style?.chart_kind ??
-        (row.period_type === "shift" ||
-        row.period_type === "daily" ||
-        row.period_type === "weekly" ||
-        row.period_type === "monthly"
-          ? "bar"
-          : "line");
+        (["shift","daily","weekly","monthly"].includes(row.period_type) ? "bar" : "line");
 
-      // 4) assemble payload для /telegram2/send
+      // формируем payload для НОВОГО эндпоинта /telegram/send
       const body: any = {
-        proc,
-        params,
-        mode: (row.send_format || "chart") === "text" ? "text" : "chart",
-        chart,
-        map_x,
-        map_y,
-        map_series,
-        unit,
-        title: style?.chart_title || "",
-        text_template: style?.text_template || undefined,
-        expand_weekly_shifts: !!style?.expand_weekly_shifts,
+        template_id: row.template_id,
+        format: row.send_format || "chart",
+        period_type: row.period_type,
+        time_of_day: (isMinute || isHourly) ? null : (row.time_of_day || "08:00:00"),
+        aggregation_type: row.aggregation_type ?? null,
+        window_minutes: isMinute ? (row.trend_window_minutes ?? null) : null,
+        avg_seconds: isMinute ? (row.trend_avg_seconds ?? 10) : null,
         target_type: "telegram",
         target_value: String(row.target_value),
+
+        // стили (опционально)
+        chart_title: style?.chart_title || "",
+        text_template: style?.text_template || undefined,
+        chart_kind: chartKind,
+        // expand_weekly_shifts можно прокинуть, но бэк weekly всё равно решает сам
+        expand_weekly_shifts: !!style?.expand_weekly_shifts,
       };
 
-      await api.post("/telegram2/send", body);
-      message.success("Отправлено (см. Телеграм)");
+      // ⛔️ Никаких proc/params здесь НЕ шлём.
+      // Бэк сам выберет хранимку:
+      //  - weekly → sp_Telegram_WeeklyShiftCumulative(+@week_monday, +@tag_ids)
+      //  - иначе → meta.proc из шаблона
+
+      const res = await api.post("/telegram/send", body);
+      if ((res as any)?.ok) {
+        message.success("Отправлено (см. Телеграм)");
+      } else {
+        message.error(`Не отправлено: ${res?.detail || "ошибка"}`);
+      }
     } catch (e: any) {
-      message.error(`Ошибка отправки: ${e?.message || e}`);
+      message.error(`Ошибка отправки: ${e?.response?.data?.detail || e?.message || e}`);
     }
   },
   [api, tasks]
 );
 
 
+
+
 // PATCH: диалог «Настройки» — сохраняем в schedule.style_override и/или в ReportStyles (как у тебя ниже)
+// src/pages/SchedulePage.tsx
 const handleStyleSave = useCallback(
   async (style: any) => {
     if (!styleRecord) return;
     try {
-      // если есть API для каталога стилей — сначала создадим/сохраним там
-      // (если 404 — молча просто запишем override в задание)
-      let styleId: number | null = null;
-      try {
-        const created = await api.post("/telegram/styles", {
-          name: `Style #${styleRecord.template_id}:${styleRecord.period_type}`,
-          style,
-        });
-        styleId = created?.id ?? null;
-      } catch {
-        styleId = null;
-      }
+      // апсерт единственного стиля для шаблона
+      const up = await api.put(`/telegram/templates/${styleRecord.template_id}/style`, {
+        name: `Template ${styleRecord.template_id} style`,
+        style,
+      });
+      const styleId = up?.id ?? null;
 
       const payload: any = {
         template_id: styleRecord.template_id,
@@ -821,8 +781,9 @@ const handleStyleSave = useCallback(
         window_minutes: styleRecord.trend_window_minutes ?? null,
         avg_seconds: styleRecord.trend_avg_seconds ?? null,
         style_id: styleId,
-        style_override: style, // JSON
+        style_override: style, // для немедленного превью и backward-compat
       };
+
       const res = await api.put(API.SCHEDULE_UPDATE(styleRecord.id), payload);
       if ((res as any)?.ok !== true) throw new Error((res as any)?.detail || "PUT failed");
 

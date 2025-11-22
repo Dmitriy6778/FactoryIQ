@@ -322,8 +322,10 @@ def _render_line(series: List[Dict[str, Any]], title: str) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 def _render_bar(series: List[Dict[str, Any]], title: str) -> str:
-    if not series: return ""
-    # Одна или несколько серий по категориям
+    if not series:
+        return ""
+
+    # Основная сетка категорий (x-ось)
     x_labels = series[0]["x"]
     n = len(x_labels)
     m = max(1, len(series))
@@ -334,28 +336,90 @@ def _render_bar(series: List[Dict[str, Any]], title: str) -> str:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    for i, s in enumerate(series):
-        ax.bar(idx + (i - (m-1)/2)*width, s["y"], width, label=s.get("name","Серия"))
+    # === общий максимум по всем сериям, чтобы оценивать относительную высоту бара ===
+    all_vals: List[float] = []
+    for s in series:
+        for v in s["y"]:
+            try:
+                all_vals.append(float(v))
+            except Exception:
+                pass
+    global_max = max(all_vals) if all_vals else 1.0
 
-        # подписи внутри
-        for j, v in enumerate(s["y"]):
+    # === подбор размера шрифта по длине строки ===
+    def pick_base_fontsize(label: str) -> int:
+        L = len(label)
+        if L <= 4:
+            return 10      # 8.3, 11.2
+        if 5 <= L <= 6:
+            return 9       # 123.45
+        if 7 <= L <= 8:
+            return 8       # 1234.56
+        return 7           # длинные
+
+    # --- рисуем серии ---
+    for i, s in enumerate(series):
+        xs = idx + (i - (m - 1) / 2) * width
+        ys = s["y"]
+
+        rects = ax.bar(xs, ys, width, label=s.get("name", "Серия"))
+
+        for x, v in zip(xs, ys):
+            # приведение к числу
             try:
                 val = float(v)
             except Exception:
                 continue
-            ax.text(idx[j] + (i - (m-1)/2)*width, val*0.5, f"{val:.1f}", ha="center", va="center", color="white", fontsize=10, fontweight="bold")
+
+            # нули не подписываем
+            if abs(val) < 1e-9:
+                continue
+
+            label = f"{val:.1f}"
+
+            # относительная высота бара (0..1)
+            rel = val / global_max if global_max > 0 else 1.0
+
+            # базовый шрифт по длине числа
+            fs = pick_base_fontsize(label)
+
+            # корректировка по относительной высоте бара:
+            # чем ниже бар, тем меньше шрифт
+            if rel < 0.10:
+                fs -= 3
+            elif rel < 0.20:
+                fs -= 2
+            elif rel < 0.35:
+                fs -= 1
+
+            fs = max(fs, 6)  # не даём шрифту стать совсем микроскопическим
+
+            # ВСЕГДА рисуем ПОДПИСЬ ВНУТРИ столбца, по центру
+            ax.text(
+                x,
+                val * 0.5,           # середина по высоте бара
+                label,
+                ha="center",
+                va="center",
+                color="white",       # на синем фоне читабельно
+                fontsize=fs,
+                fontweight="bold",
+            )
 
     ax.set_xticks(idx)
     ax.set_xticklabels(x_labels, rotation=0, fontsize=10)
     ax.grid(axis="y", linestyle="--", alpha=0.25)
+
     if m > 1:
         ax.legend(frameon=False, loc="lower center", ncols=min(3, m))
+
     ax.set_title(title)
     buf = io.BytesIO()
     plt.tight_layout()
     fig.savefig(buf, format="png", bbox_inches="tight")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
+
 
 # ---------- Table renderer (mono text) ----------
 def _make_text_table(columns: List[str], rows: List[Dict[str, Any]], fmt: Optional[TableFormat]) -> str:
@@ -430,7 +494,12 @@ def preview(payload: PreviewIn = Body(...)):
             tmpl = getattr(payload, "text_template", None)
             if tmpl:
                 txt = _render_text_from_template(data, tmpl)
-                return {"ok": True, "text": txt, "columns": cols, "rows": data}
+                # если шаблон пустой — вернём и text_table для fallback
+                if txt and txt.strip():
+                    return {"ok": True, "text": txt, "columns": cols, "rows": data}
+                tbl = _make_text_table(cols, data, payload.table)
+                return {"ok": True, "text": txt, "text_table": tbl, "columns": cols, "data": data}
+            # без шаблона — как и было
             txt = _make_text_table(cols, data, payload.table)
             return {"ok": True, "text_table": txt, "columns": cols, "data": data}
 

@@ -1,0 +1,248 @@
+:global(.UserScreenEditor_) {
+    min-height: 100vh;
+    width: 100vw;
+    position: fixed;
+    left: 0;
+    top: 0;
+    background: #fafcff;
+    overflow: hidden;
+    /* <— тут ключевое: не даём внешнему контейнеру заводить свои скроллбары */
+    z-index: 1;
+}
+
+:global(body.allow-editor-scroll),
+:global(body.allow-editor-scroll) #root {
+    overflow: visible !important;
+}
+
+/* строка с вашими карточками/виджетами */
+:global(.ant-row) {
+    align-items: flex-start;
+    /* не растягиваем детей по высоте */
+    overflow: visible;
+    /* ничего не клипуем по вертикали */
+}
+
+/* сами колонки */
+:global(.ant-col) {
+    height: auto;
+    /* на всякий случай */
+    overflow: visible;
+}
+
+.headerRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0 6px 0;
+    /* было 24px 0 8px 0, теперь компактнее */
+    min-height: 46px;
+    position: relative;
+}
+
+.title {
+    font-size: 1.32rem;
+    /* было 2.1rem — уменьшили */
+    font-weight: 700;
+    color: #1a2947;
+    letter-spacing: 0.7px;
+    margin-bottom: 0;
+    line-height: 1.13;
+    flex: 1 1 auto;
+    text-align: center;
+}
+
+.headerClock {
+    flex: 0 0 auto;
+    min-width: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.clockText {
+    font-size: 1.08rem;
+    color: #1976d2;
+    font-weight: 600;
+    background: #e7f1fd;
+    border-radius: 7px;
+    padding: 3px 16px 3px 13px;
+    min-width: 105px;
+    text-align: center;
+}
+
+
+.mainRow {
+    flex: 1 1 0;
+    display: flex;
+    min-height: 0;
+    align-items: stretch;
+}
+
+/* было overflow-x:hidden; — из-за него пряталась кнопка */
+.sidebarCol {
+    transition: width 0.2s, min-width 0.2s;
+    min-width: 400px;
+    max-width: 400px;
+    width: 28%;
+    /* Важно, чтобы ухо могло выглядывать */
+    overflow: visible;
+    /* <-- так */
+    background: none;
+    position: relative;
+}
+
+/* вместо 0 делаем тонкую «шину», чтобы видно было ухо */
+.sidebarCol.collapsed {
+    width: 20px !important;
+    /* <-- было 0 */
+    min-width: 20px !important;
+    max-width: 20px !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    /* <-- важно */
+}
+
+
+.sidebarCard {
+    border-radius: 18px !important;
+    box-shadow: 0 4px 16px rgba(31, 72, 122, 0.09) !important;
+    min-height: 400px;
+    margin-bottom: 18px;
+    background: #f8fafb !important;
+}
+
+/* контейнер страницы — как было */
+.editorContainer {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    /* скроллим только внутри scrollShell */
+}
+
+/* строка с колонками */
+.mainRow {
+    flex: 1;
+    min-height: 0;
+}
+
+/* СКРОЛЛЕР. Делаем ему явную «раму» по высоте окна */
+.scrollShell {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    /* высота = весь экран минус хедер/панель (подгони при необходимости) */
+    max-height: calc(100vh - 140px) !important;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    padding: 0 !important;
+}
+
+/* Рамка, определяющая реальные размеры контента */
+.zoomFrame {
+    position: relative;
+    /* В ПОТОКЕ! */
+    /* width/height приходят inline из JSX = areaSize * zoom */
+}
+
+/* Рабочая область — ТОЛЬКО relative, без absolute */
+.workArea {
+    position: relative;
+    /* <— ключевой момент */
+    left: auto;
+    top: auto;
+    /* на всякий случай сбросить */
+    border-radius: 24px;
+    background: #848a8c;
+    transition: width .2s, height .2s, transform .12s;
+}
+
+
+
+
+.sizeInputRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.collapseBtn {
+    position: absolute;
+    top: 10px;
+    right: -22px;
+    background: #fff;
+    border-radius: 0 9px 9px 0;
+    border: 1px solid #dde7fa;
+    box-shadow: 0 4px 16px rgba(31, 72, 122, 0.14);
+    z-index: 10;
+    width: 32px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: right 0.2s;
+}
+
+.collapseBtn.collapsed {
+    right: -32px;
+}
+
+.add-tag-panel {
+    min-width: 340px;
+    background: #fafdff;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(31, 72, 122, 0.10);
+    padding: 32px 24px 28px 24px;
+    position: absolute;
+    top: 80px;
+    left: 60px;
+    z-index: 999;
+}
+
+.context-menu {
+    background: #fff;
+    border-radius: 13px;
+    box-shadow: 0 4px 24px rgba(31, 72, 122, 0.11);
+    padding: 7px 0;
+    min-width: 184px;
+    border: 1px solid #dde6f7;
+}
+
+.context-menu-button {
+    width: 100%;
+    background: none;
+    border: none;
+    outline: none;
+    text-align: left;
+    padding: 10px 17px;
+    font-size: 15px;
+    color: #24487c;
+    border-radius: 7px;
+    transition: background 0.12s;
+    cursor: pointer;
+}
+
+@media (max-width: 1024px) {
+    .editorContainer {
+        padding: 0 3vw;
+    }
+
+    .mainRow {
+        flex-direction: column;
+    }
+
+    .sidebarCard {
+        min-height: 10px;
+    }
+
+    .workArea {
+        min-height: 410px;
+    }
+}

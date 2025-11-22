@@ -1,0 +1,155 @@
+.container {
+    margin-top: 10px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    width: 420px;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.header h3 {
+    font-size: 18px;
+    margin: 0;
+    color: #333;
+}
+
+.closeButton {
+    background-color: #f44336;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.closeButton:hover {
+    background-color: #d32f2f;
+}
+
+.searchInput {
+    width: 380px;
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 14px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.loading {
+    color: #007bff;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.error {
+    color: red;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.tagList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 320px;
+    overflow-y: auto;
+    border-top: 1px solid #eee;
+}
+
+.tagItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+    background-color: #f9f9f9;
+    transition: background-color 0.2s ease;
+}
+
+.tagItem:hover {
+    background-color: #f1f1f1;
+}
+
+.tagInfo {
+    flex: 1;
+    margin-right: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+.tagName {
+    font-weight: bold;
+    font-size: 14px;
+    color: #333;
+}
+
+.tagDescription {
+    font-size: 12px;
+    color: #777;
+    margin-top: 4px;
+}
+
+.addButton {
+    background-color: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    font-size: 18px;
+}
+
+.addButton:hover {
+    background-color: #388e3c;
+}
+
+.addButton .material-icons {
+    font-size: 20px;
+}
+
+
+.typeBtn {
+    border: 1.5px solid #e0e0e0;
+    border-radius: 7px;
+    background: #fafcff;
+    color: #555;
+    padding: 3px 12px 3px 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-right: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.18s, color 0.18s, border 0.18s;
+}
+
+.typeBtn:hover {
+    background: #e3eafc;
+    color: #1565c0;
+    border: 1.5px solid #bcd3fa;
+}
+
+.activeType {
+    background: #1976d2;
+    color: #fff !important;
+    border: 1.5px solid #1976d2;
+}

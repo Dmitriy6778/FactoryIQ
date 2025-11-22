@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useApi } from "../shared/useApi";
 import { useAuth } from "../components/Auth/AuthContext";
 import { ProtectedRoute } from "../components/Auth/PermissionGuard";
-
+import BackButton from "../components/BackButton";
 type User = {
     id: number;
     username: string;
@@ -255,6 +255,7 @@ const UsersAdminPageInner: React.FC = () => {
 
     return (
         <div style={{ padding: 16, maxWidth: 1200, margin: "0 auto" }}>
+             <BackButton />
             <h2 style={{ marginTop: 0 }}>Пользователи и права</h2>
 
             <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 16 }}>
@@ -414,6 +415,8 @@ const UsersAdminPage: React.FC = () => (
     <ProtectedRoute anyOf={["Users.Manage"]} fallback={<div style={{ padding: 16 }}>Загрузка…</div>}>
         <UsersAdminPageInner />
     </ProtectedRoute>
+  
+  
 );
 
 export default UsersAdminPage;

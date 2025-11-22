@@ -9,6 +9,7 @@ from jose import jwt, JWTError
 
 from ..config import get_env
 from .db import _conn_for  # используем твою функцию подключения
+from passlib.context import CryptContext
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -24,6 +25,21 @@ except Exception:
     JWT_TTL_SECONDS = 43200
 
 SETUP_TOKEN = get_env("FABRIQ_SETUP_TOKEN", "")
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    if not password_hash:
+        return False
+    try:
+        return pwd_context.verify(password, password_hash)
+    except Exception:
+        return False
 
 # ---------------- DB ----------------
 def _db() -> pyodbc.Connection:
@@ -43,6 +59,9 @@ PERMISSIONS_CATALOG: List[str] = [
     "TelegramReports.View", "TelegramReports.Manage",
     "TelegramChannels.View", "TelegramChannels.Manage",
     "Users.Manage",
+    "UserScreens.View",
+    "UserScreens.Manage",
+
 ]
 
 ROLE_PRESETS: Dict[str, List[str]] = {
@@ -55,11 +74,17 @@ ROLE_PRESETS: Dict[str, List[str]] = {
         "Reports.View",
         "TelegramReports.View",
         "TelegramChannels.View",
+        "UserScreens.View",
+        "UserScreens.Manage",
+
     ],
     "Analyst": [
         "Analytics.View", "Analytics.Run",
         "Reports.View",
         "TelegramReports.View",
+        "UserScreens.View",
+        "UserScreens.Manage",
+
     ],
     "Reporter": [
         "Reports.Manage",
@@ -102,6 +127,16 @@ class SetupBootstrapBody(BaseModel):
 
 class PromoteAdminBody(BaseModel):
     user_id: int
+
+class LoginBody(BaseModel):
+    username: str = Field(..., min_length=1)
+    email: Optional[str] = None
+    password: Optional[str] = None  # NEW
+
+
+class PasswordChangeBody(BaseModel):
+    old_password: Optional[str] = None
+    new_password: str = Field(..., min_length=6, max_length=128)
 
 # ---------------- Helpers ----------------
 def _grant_admin_permissions(conn: pyodbc.Connection, user_id: int, granted_by: Optional[int] = None):
@@ -253,32 +288,55 @@ def promote_admin(body: PromoteAdminBody = Body(...), x_setup_token: Optional[st
         _grant_admin_permissions(conn, body.user_id, None)
 
     return {"status": "ok", "user_id": body.user_id, "granted": len(ROLE_PRESETS["Admin"])}
-
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginBody = Body(...)):
     """
     Логин / автосоздание пользователя.
-    Если это первый пользователь (<=1 в dbo.Users) или в системе ещё нет прав (0 в UserPermissions),
-    текущий пользователь автоматически получает роль admin и все права.
+
+    Логика:
+    - если пользователь существует и у него есть PasswordHash => требуем пароль и проверяем;
+    - если пользователь существует и пароля ещё нет => позволяем войти без пароля (как раньше);
+    - если пользователя нет => создаём его, при наличии password сразу задаём пароль.
+    Дополнительно: как и раньше, первый пользователь / система без грантов
+    автоматически получают роль admin и все права.
     """
     username = (body.username or "").strip()
     email = (body.email or None)
+    password = (body.password or None)
     if not username:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="username is required")
 
     with _db() as conn, conn.cursor() as cur:
-        cur.execute("SELECT TOP 1 Id FROM dbo.Users WHERE Username = ?", username)
+        # ищем пользователя
+        cur.execute("SELECT TOP 1 Id, PasswordHash FROM dbo.Users WHERE Username = ?", username)
         row = cur.fetchone()
+
         if row:
             user_id = int(row.Id)
+            password_hash = getattr(row, "PasswordHash", None)
+
+            # если пароль уже установлен — логиним только по паролю
+            if password_hash:
+                if not password:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Password is required for this user",
+                    )
+                if not _verify_password(password, password_hash):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid username or password",
+                    )
         else:
+            # создаём нового пользователя
+            password_hash = _hash_password(password) if password else None
             cur.execute(
                 """
-                INSERT INTO dbo.Users (Username, Email, CreatedAt)
+                INSERT INTO dbo.Users (Username, Email, PasswordHash, CreatedAt)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, SYSUTCDATETIME())
+                VALUES (?, ?, ?, SYSUTCDATETIME())
                 """,
-                username, email
+                username, email, password_hash
             )
             row2 = cur.fetchone()
             if not row2:
@@ -289,6 +347,7 @@ def login(body: LoginBody = Body(...)):
             except Exception:
                 pass
 
+        # далее — старая логика автогранта admin
         cur.execute("SELECT COUNT(1) FROM dbo.Users")
         users_cnt = int(cur.fetchone()[0] or 0)
 
@@ -299,6 +358,56 @@ def login(body: LoginBody = Body(...)):
             _grant_admin_permissions(conn, user_id, user_id)
 
     return _issue_token(user_id, username)
+
+@router.post("/password/change")
+def change_password(body: PasswordChangeBody = Body(...), user=Depends(get_current_user)):
+    """
+    Пользователь меняет/задаёт себе пароль.
+
+    - Если пароля ещё нет (PasswordHash IS NULL) — old_password не требуется.
+    - Если пароль уже есть — проверяем old_password.
+    """
+    new_password = (body.new_password or "").strip()
+    if len(new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password is too short (min 6 characters)",
+        )
+
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT PasswordHash FROM dbo.Users WHERE Id = ?", user["id"])
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        current_hash = getattr(row, "PasswordHash", None)
+
+        # если пароль уже был — проверяем old_password
+        if current_hash:
+            if not body.old_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Old password is required",
+                )
+            if not _verify_password(body.old_password, current_hash):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Old password is incorrect",
+                )
+
+        # устанавливаем новый пароль
+        new_hash = _hash_password(new_password)
+        cur.execute(
+            "UPDATE dbo.Users SET PasswordHash = ? WHERE Id = ?",
+            new_hash, user["id"]
+        )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+    return {"status": "ok"}
+
 
 @router.get("/me", response_model=MeResponse)
 def me(user=Depends(get_current_user)):

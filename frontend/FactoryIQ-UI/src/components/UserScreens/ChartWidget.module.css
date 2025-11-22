@@ -1,0 +1,208 @@
+:root {
+    --widget-border: #b4b4b4;
+    --widget-shadow: 0 4px 12px rgba(30, 40, 60, 0.08);
+    --text-soft: #999;
+    --text-strong: #21284a;
+    --primary: #1976d2;
+    --tag-bg: #f8fafd;
+    --tag-bg-active: #e8f1fd;
+    --tag-border: #dbeafe;
+}
+
+.placeholder {
+    color: #888;
+    padding: 12px;
+}
+
+.noData {
+    color: #888;
+    padding: 6px 8px;
+}
+
+.widget {
+    width: 100%;
+    height: 100%;
+    background: var(--bg, #ffffff);
+    border: 1.5px solid var(--widget-border);
+    border-radius: 10px;
+    box-shadow: var(--widget-shadow);
+    padding: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Верхняя панель (drag handle) */
+.dragHandle {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2px;
+    cursor: move;
+    user-select: none;
+}
+
+.titleLeft {
+    font-size: 13px;
+    font-weight: 500;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.titleText {
+    color: var(--text-strong);
+}
+
+.tagsInline {
+    color: var(--text-soft);
+    margin-left: 7px;
+    font-size: 12px;
+}
+
+.iconButton,
+.iconButtonAdd {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--primary);
+    padding: 2px;
+}
+
+.iconButton {
+    margin-right: 3px;
+}
+
+.resizeHandle {
+    position: absolute;
+    right: 8px;
+    bottom: 4px;
+    cursor: se-resize;
+    color: #b4b4b4;
+    font-size: 18px;
+    z-index: 10;
+    user-select: none;
+}
+
+.plotArea {
+    width: 100%;
+    height: calc(100% - 28px);
+}
+
+/* Модалка настроек */
+.modal {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    border: 1px solid #bbb;
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 360px;
+    box-shadow: 0 4px 24px 8px #23254b22;
+    max-height: 90vh;
+    overflow: auto;
+    z-index: 2147483647;
+}
+
+.modalSection {
+    margin-bottom: 12px;
+}
+
+.sectionTitle {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.tagList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.tagPill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--tag-bg);
+    border-radius: 6px;
+    border: 1px solid var(--tag-border);
+    cursor: pointer;
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--text-strong);
+}
+
+.tagPillActive {
+    background: var(--tag-bg-active);
+    border: 1.5px solid var(--primary);
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.tagRemove {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: #d14141;
+}
+
+.tagSettings {
+    border: 1px dashed #e5e7eb;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.fieldRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.input {
+    margin-left: 8px;
+    width: 240px;
+    padding: 4px 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+.inputNumber {
+    width: 60px;
+    padding: 2px 6px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+.select {
+    margin-left: 8px;
+    padding: 2px 6px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+.checkboxLabel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hint {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 4px;
+}
+
+.closeBtn {
+    margin-top: 8px;
+    background: var(--primary);
+    color: #fff;
+    padding: 5px 14px;
+    border-radius: 7px;
+    border: none;
+}

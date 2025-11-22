@@ -1,0 +1,320 @@
+.sidebarContainer {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.06);
+    padding: 18px 14px 12px 14px;
+    min-width: 240px;
+    /* ↓ Можно уменьшить если нужно */
+    max-width: 350px;
+    width: 100%;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+
+.title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    letter-spacing: 0.01em;
+}
+
+.typeSelector {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    margin-bottom: 8px;
+}
+
+
+.typeBtn {
+    border: none;
+    outline: none;
+    background: #f4f6fb;
+    color: #2e3955;
+    border-radius: 5px;
+    padding: 4px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 63px;
+}
+
+.typeBtn:hover,
+.activeType {
+    background: #1976d2;
+    color: #fff;
+}
+
+.searchInput {
+    border: 1px solid #e0e5ed;
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 14px;
+    width: 100%;
+    max-width: 99%;
+    margin-bottom: 10px;
+    outline: none;
+    transition: border 0.14s;
+    box-sizing: border-box;
+}
+
+.searchInput:focus {
+    border: 1.5px solid #1976d2;
+}
+
+.loading,
+.error {
+    font-size: 13px;
+    color: #999;
+    margin: 4px 0 0 2px;
+}
+
+.error {
+    color: #d32f2f;
+}
+
+.tagList {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 600px;
+    overflow-y: auto;
+    min-height: 24px;
+}
+
+.tagItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    justify-content: flex-start;
+    padding: 5px 0 5px 2px;
+    border-bottom: 1px solid #f2f3f7;
+    cursor: pointer;
+    transition: background 0.13s;
+    min-height: 33px;
+    border-radius: 7px;
+}
+
+.tagItem:hover {
+    background: #f3f8fe;
+}
+
+
+.sidebarWrap {
+    position: relative;
+    width: 100%;
+    min-width: 12px;
+}
+
+/* ухо торчит на 12px в рабочую область */
+.collapseHandle {
+    position: absolute;
+    top: 10px;
+    right: -12px;
+    /* важно: за край колонки */
+    z-index: 5;
+    width: 22px;
+    height: 40px;
+    border-radius: 0 8px 8px 0;
+    border: 1px solid #dde7fa;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(31, 72, 122, .12);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #24487c;
+}
+
+/* при свёрнутом состоянии контент прячем, но ухо остаётся */
+.isCollapsed .sidebarContainer {
+    display: none;
+}
+
+
+.isCollapsed .collapseHandle {
+    right: -12px;
+}
+
+.isCollapsed .sidebarContainer {
+    display: none;
+}
+
+.isCollapsed {
+    width: 12px;
+    min-width: 12px;
+}
+
+.sidebarContainer {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, .06);
+    padding: 18px 14px 12px 14px;
+    min-width: 240px;
+    max-width: 350px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    letter-spacing: .01em;
+}
+
+.analyticsSection {
+    margin-bottom: 8px;
+}
+
+.analyticDraggable {
+    border: 1px solid #1976d2;
+    border-radius: 6px;
+    background: #f5f7fa;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: grab;
+}
+
+.note {
+    font-size: 12px;
+    color: #888;
+}
+
+.typeSelector {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.smallLabel {
+    font-size: 13px;
+    opacity: .8;
+}
+
+.typeBtnsRow {
+    display: flex;
+    gap: 7px;
+}
+
+.typeBtn {
+    border: none;
+    outline: none;
+    background: #f4f6fb;
+    color: #2e3955;
+    border-radius: 5px;
+    padding: 4px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 63px;
+}
+
+.typeBtn:hover,
+.activeType {
+    background: #1976d2;
+    color: #fff;
+}
+
+.searchInput {
+    border: 1px solid #e0e5ed;
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 14px;
+    width: 100%;
+    margin-bottom: 10px;
+    outline: none;
+    transition: border .14s;
+    box-sizing: border-box;
+}
+
+.searchInput:focus {
+    border: 1.5px solid #1976d2;
+}
+
+.loading,
+.error {
+    font-size: 13px;
+    color: #999;
+    margin: 4px 0 0 2px;
+}
+
+.error {
+    color: #d32f2f;
+}
+
+.listViewport {
+    position: relative;
+    max-height: 600px;
+    min-height: 200px;
+    overflow: auto;
+    border: 1px solid #f2f4fb;
+    border-radius: 10px;
+    background: #fafcff;
+}
+
+.loadingMore {
+    padding: 8px 10px;
+    font-size: 12px;
+    color: #777;
+}
+
+.tagItem {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 5px 8px;
+    border-bottom: 1px solid #f2f3f7;
+    cursor: pointer;
+    transition: background .13s;
+    border-radius: 7px;
+}
+
+.tagItem:hover {
+    background: #f3f8fe;
+}
+
+.tagInfo {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.tagName {
+    font-weight: 500;
+    font-size: 14px;
+    color: #22375a;
+    word-break: break-word;
+}
+
+.tagDescription {
+    font-size: 11.4px;
+    color: #868ea0;
+    display: block;
+}
+
+.footerNote {
+    font-size: 12px;
+    color: #bbb;
+    margin-top: 8px;
+    text-align: left;
+}

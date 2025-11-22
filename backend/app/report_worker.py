@@ -8,8 +8,11 @@ from datetime import datetime, time as dt_time, timedelta
 from typing import Optional, Tuple, Dict, Any
 
 # берем из app/config.py
-from config import get_conn_str, get_env
-
+try:
+    from .config import get_conn_str, get_env
+except ImportError:
+    # fallback, если модуль запускается не как пакет (например, старые скрипты)
+    from config import get_conn_str, get_env
 # =========================
 # НАСТРОЙКИ (через .env)
 # =========================
@@ -278,7 +281,7 @@ def compute_next_run(period_type: str, time_of_day, prev_run: Optional[datetime]
         return base + timedelta(minutes=delta_min)
 
     if period_type == "hourly":
-        return (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+        return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
     # для остальных опираемся на prev_run, но не раньше now
     candidate = (prev_run or now)
@@ -295,11 +298,18 @@ def compute_next_run(period_type: str, time_of_day, prev_run: Optional[datetime]
             candidate += timedelta(days=1)
         return candidate
 
+    # 🔹 НОВАЯ логика weekly — как “сменный” режим: 08:00 и 20:00 КАЖДЫЙ день
     if period_type == "weekly":
-        candidate = candidate.replace(hour=hh, minute=mm, second=ss, microsecond=0)
-        if candidate <= now:
-            candidate += timedelta(days=7)
-        return candidate
+        base = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+        first  = base                 # первая смена (обычно 08:00)
+        second = base + timedelta(hours=12)  # вторая смена (20:00)
+
+        if now < first:
+            return first
+        if now < second:
+            return second
+        # обе смены на сегодня прошли — следующий день в hh:mm
+        return first + timedelta(days=1)
 
     if period_type == "monthly":
         base = prev_run or now

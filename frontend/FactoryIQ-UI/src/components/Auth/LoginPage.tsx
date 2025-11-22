@@ -16,7 +16,7 @@ const LoginPage: React.FC = () => {
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [checkingSetup, setCheckingSetup] = useState(true);
-
+const [password, setPassword] = useState("");
     useEffect(() => {
         let ignore = false;
         (async () => {
@@ -42,18 +42,30 @@ const LoginPage: React.FC = () => {
         }
     }, [isAuthenticated, location.state, navigate]);
 
-    const onSubmit = useCallback(async (e: React.FormEvent) => {
+   const onSubmit = useCallback(
+    async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!username.trim()) { setError("Введите логин"); return; }
-        setSubmitting(true); setError(null);
+        if (!username.trim()) {
+            setError("Введите логин");
+            return;
+        }
+        setSubmitting(true);
+        setError(null);
         try {
-            await login({ username: username.trim(), email: email.trim() || undefined });
+            await login({
+                username: username.trim(),
+                email: email.trim() || undefined,
+                password: password || undefined,
+            });
         } catch (err: any) {
             setError(err?.detail?.error || err?.message || "Не удалось войти");
         } finally {
             setSubmitting(false);
         }
-    }, [username, email, login]);
+    },
+    [username, email, password, login]
+);
+
 
     if (checkingSetup) {
         return (
@@ -96,6 +108,21 @@ const LoginPage: React.FC = () => {
                         marginBottom: 12,
                     }}
                 />
+<label style={{ display: "block", marginBottom: 6 }}>Пароль (если задан)</label>
+<input
+    value={password}
+    onChange={(e) => setPassword(e.target.value)}
+    placeholder="••••••••"
+    type="password"
+    style={{
+        width: "100%",
+        height: 40,
+        padding: "0 12px",
+        borderRadius: 8,
+        border: "1px solid #ddd",
+        marginBottom: 12,
+    }}
+/>
 
                 <label style={{ display: "block", marginBottom: 6 }}>Email (необязательно)</label>
                 <input

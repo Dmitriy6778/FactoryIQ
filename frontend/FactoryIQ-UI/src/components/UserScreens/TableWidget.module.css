@@ -1,0 +1,161 @@
+/* контейнер виджета */
+.wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+
+/* тело карточки тянется на остаток, без переполнения */
+.card :global(.ant-card-body) {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    /* был inline */
+    position: relative;
+
+    overflow: hidden;
+    /* чтобы внутренности не вылезали */
+}
+
+/* область таблицы внутри body — тянется на 100% */
+.tableHost {
+    flex: 1 1 auto;
+    min-height: 0;
+    /* критично для правильного расчёта высоты flex-детей */
+    display: flex;
+    flex-direction: column;
+}
+
+/* делаем всю иерархию antd-таблицы flex-колонкой с body, который растягивается */
+.tableHost :global(.ant-table-wrapper),
+.tableHost :global(.ant-spin-nested-loading),
+.tableHost :global(.ant-spin-container),
+.tableHost :global(.ant-table),
+.tableHost :global(.ant-table-container) {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* шапка фиксированной высоты (сколько получится), не скроллится */
+.tableHost :global(.ant-table-header) {
+    flex: 0 0 auto;
+    overflow: hidden;
+}
+
+/* основное тело — именно оно тянется и даёт вертикальный скролл */
+.tableHost :global(.ant-table-body) {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto !important;
+    /* берём под контроль */
+}
+
+/* на всякий, не даём wrapper'у расширяться шире родителя */
+.tableHost :global(.ant-table-wrapper) {
+    max-width: 100%;
+}
+
+/* TableWidget.module.css */
+.container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* тело карточки тянется на остаток, без переполнения */
+.card :global(.ant-card-body) {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    overflow: hidden;
+}
+
+/* хост таблицы внутри body */
+.body {
+    flex: 1 1 auto;
+    min-height: 0;
+    /* критично! */
+    display: flex;
+    flex-direction: column;
+}
+
+/* делаем вложенную иерархию antd высотой 100% */
+.body :global(.ant-table-wrapper),
+.body :global(.ant-spin-nested-loading),
+.body :global(.ant-spin-container),
+.body :global(.ant-table),
+.body :global(.ant-table-container) {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.body :global(.ant-table-header) {
+    flex: 0 0 auto;
+    overflow: hidden;
+}
+
+.body :global(.ant-table-body) {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+
+.resizer {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    z-index: 10;
+    /* 👈 выше карточки */
+    border-right: 2px solid rgba(0, 0, 0, .22);
+    border-bottom: 2px solid rgba(0, 0, 0, .22);
+    border-radius: 2px;
+    opacity: .9;
+    background: linear-gradient(135deg, transparent 50%, rgba(0, 0, 0, .08) 50%);
+    pointer-events: auto;
+}
+
+/* components/UserScreens/TableWidget.module.css */
+
+.latestRow td {
+    background: #eaf8ea !important;
+    /* мягкая зелёная для актуальной строки */
+}
+
+.playbackBar {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.playbackDt {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* текущая проигрываемая строка */
+.playRow {
+  background-color: #fff7e6 !important;
+}
+
+/* последняя строка, как было раньше */
+.latestRow {
+  font-weight: 600;
+}

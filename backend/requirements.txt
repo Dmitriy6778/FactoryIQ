@@ -22,3 +22,4 @@ requests>=2.31
 
 # --- Utils ---
 aiofiles>=23.1.0   # если используешь async файловые операции
+passlib[bcrypt]
