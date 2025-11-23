@@ -57,22 +57,6 @@ _CANON = {
     "@week_monday": "@week_monday",
 }
 
-def _canon_name(k: str) -> str:
-    k0 = (k or "").strip()
-    k1 = k0[1:] if k0.startswith("@") else k0
-    return _CANON.get(k1.lower(), f"@{k1}" if not k0.startswith("@") else k0)
-
-def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    for k, v in (params or {}).items():
-        out[_canon_name(k)] = v
-    # alias support (если прилетело только @TagIds/TagIds)
-    if "@tag_ids" not in out:
-        for alias in ("@TagIds", "TagIds", "tag_ids", "TagIds".lower()):
-            if alias in params:
-                out["@tag_ids"] = params[alias]
-                break
-    return out
 
 _TAG_ALIASES = {"@TagIds", "@tag_ids", "TagIds", "tag_ids"}
 
@@ -322,21 +306,47 @@ def _render_line(series: List[Dict[str, Any]], title: str) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 def _render_bar(series: List[Dict[str, Any]], title: str) -> str:
+    """
+    Улучшенная bar-диаграмма:
+    - толщина столбцов зависит от числа серий (без налезания)
+    - подписи только для достаточно «заметных» значений (мелкие ~0 не подписываем)
+    - небольшой запас сверху по Y для цифр
+    """
     if not series:
         return ""
 
-    # Основная сетка категорий (x-ось)
     x_labels = series[0]["x"]
     n = len(x_labels)
-    m = max(1, len(series))
-    idx = np.arange(n)
-    width = min(0.9, 0.8 / m)
+    m = max(1, len(series))  # кол-во серий
 
-    fig, ax = plt.subplots(figsize=(8, 4), dpi=140)
+    idx = np.arange(n)
+
+    # --- ширина бара в зависимости от числа серий ---
+    if m == 1:
+        bar_width = 0.6   # жирные одиночные
+    elif m == 2:
+        bar_width = 0.38
+    elif m == 3:
+        bar_width = 0.30
+    else:
+        bar_width = 0.24  # 4+ серий
+
+    group_width = bar_width * m  # суммарная ширина пучка на категорию
+
+    # Чуть растягиваем картинку, если очень много колонок
+    if n <= 15:
+        fig_w = 8.5
+    elif n <= 25:
+        fig_w = 10
+    else:
+        fig_w = 12
+
+    fig, ax = plt.subplots(figsize=(fig_w, 4.5), dpi=140)  # было 4
+
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # === общий максимум по всем сериям, чтобы оценивать относительную высоту бара ===
+    # общий максимум по всем сериям
     all_vals: List[float] = []
     for s in series:
         for v in s["y"]:
@@ -344,76 +354,85 @@ def _render_bar(series: List[Dict[str, Any]], title: str) -> str:
                 all_vals.append(float(v))
             except Exception:
                 pass
-    global_max = max(all_vals) if all_vals else 1.0
 
-    # === подбор размера шрифта по длине строки ===
-    def pick_base_fontsize(label: str) -> int:
-        L = len(label)
-        if L <= 4:
-            return 10      # 8.3, 11.2
-        if 5 <= L <= 6:
-            return 9       # 123.45
-        if 7 <= L <= 8:
-            return 8       # 1234.56
-        return 7           # длинные
+    global_max = max(all_vals) if all_vals else 1.0
+    if global_max <= 0:
+        global_max = 1.0
+
+    y_top = global_max * 1.2
+    ax.set_ylim(0, y_top)
+
+    def fontsize_for(val: float) -> int:
+        s = f"{val:.1f}"
+        L = len(s)
+        if L <= 3:
+            return 11
+        if L <= 5:
+            return 10
+        if L <= 7:
+            return 9
+        return 8
+
+    # порог, ниже которого подписи не выводим (и «0.0» исчезнут)
+    label_threshold = max(global_max * 0.03, 0.1)
 
     # --- рисуем серии ---
     for i, s in enumerate(series):
-        xs = idx + (i - (m - 1) / 2) * width
+        # центрируем пучок вокруг каждой позиции idx
+        xs = idx - group_width / 2 + (i + 0.5) * bar_width
         ys = s["y"]
 
-        rects = ax.bar(xs, ys, width, label=s.get("name", "Серия"))
+        ax.bar(xs, ys, bar_width, label=s.get("name", "Серия"))
 
+        # подписи над столбцами
         for x, v in zip(xs, ys):
-            # приведение к числу
             try:
                 val = float(v)
             except Exception:
                 continue
 
-            # нули не подписываем
-            if abs(val) < 1e-9:
+            # мелкие/нулевые не подписываем
+            if abs(val) < label_threshold:
                 continue
 
             label = f"{val:.1f}"
+            fs = fontsize_for(val)
 
-            # относительная высота бара (0..1)
-            rel = val / global_max if global_max > 0 else 1.0
+            y_text = val + global_max * 0.04
+            if y_text > y_top * 0.96:
+                y_text = y_top * 0.96
 
-            # базовый шрифт по длине числа
-            fs = pick_base_fontsize(label)
-
-            # корректировка по относительной высоте бара:
-            # чем ниже бар, тем меньше шрифт
-            if rel < 0.10:
-                fs -= 3
-            elif rel < 0.20:
-                fs -= 2
-            elif rel < 0.35:
-                fs -= 1
-
-            fs = max(fs, 6)  # не даём шрифту стать совсем микроскопическим
-
-            # ВСЕГДА рисуем ПОДПИСЬ ВНУТРИ столбца, по центру
             ax.text(
                 x,
-                val * 0.5,           # середина по высоте бара
+                y_text,
                 label,
                 ha="center",
-                va="center",
-                color="white",       # на синем фоне читабельно
+                va="bottom",
                 fontsize=fs,
+                color="#333",
                 fontweight="bold",
             )
 
     ax.set_xticks(idx)
     ax.set_xticklabels(x_labels, rotation=0, fontsize=10)
+
     ax.grid(axis="y", linestyle="--", alpha=0.25)
 
     if m > 1:
-        ax.legend(frameon=False, loc="lower center", ncols=min(3, m))
+        # Легенда: каждый тег с новой строки (одна колонка)
+        ax.legend(
+            frameon=False,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.18),  # чуть ниже графика
+            ncol=1,                       # <-- один столбец: по одной серии в строке
+            fontsize=9,
+            handlelength=1.6,
+            handletextpad=0.6,
+        )
 
-    ax.set_title(title)
+
+    ax.set_title(title or "")
+
     buf = io.BytesIO()
     plt.tight_layout()
     fig.savefig(buf, format="png", bbox_inches="tight")
@@ -450,35 +469,64 @@ def _make_text_table(columns: List[str], rows: List[Dict[str, Any]], fmt: Option
     return "\n".join(out)
 
 # ---------- Series builder ----------
-def _build_series(cols: List[str], rows: List[Dict[str, Any]], *,
-                  map_x: str, map_y: str, map_series: Optional[str], unit: Optional[str]) -> List[Dict[str, Any]]:
-    if not rows: return []
-    # X
-    def as_x(v): return _as_dt_label(v)
-    # Группируем по имени серии
+def _build_series(
+    cols: List[str],
+    rows: List[Dict[str, Any]],
+    *,
+    map_x: str,
+    map_y: str,
+    map_series: Optional[str],
+    unit: Optional[str],
+) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
+
+    def as_x(v):
+        return _as_dt_label(v)
+
     series: Dict[str, Dict[str, Any]] = {}
+
     for r in rows:
-        name = str(r.get(map_series)) if map_series else "Серия"
+        # имя серии: сначала Description, потом поле map_series (обычно TagName)
+        if map_series:
+            base_name = r.get(map_series)
+            desc = (
+                r.get("Description")
+                or r.get("Descr")
+                or r.get("TagDescription")
+            )
+            name = str(desc or base_name or "Серия")
+        else:
+            name = "Серия"
+
         x = as_x(r.get(map_x))
         y = _num(r.get(map_y))
-        if y is None: 
+        if y is None:
             continue
-        if name not in series:
-            series[name] = {"name": name if not unit else f"{name}, {unit}", "x": [], "y": []}
-        series[name]["x"].append(x)
-        series[name]["y"].append(y)
-    # упорядочиваем X по первому появлению
+
+        key = name  # ключ по понятному имени
+        if key not in series:
+            label = name if not unit else f"{name}, {unit}"
+            series[key] = {"name": label, "x": [], "y": []}
+
+        series[key]["x"].append(x)
+        series[key]["y"].append(y)
+
+    # сохраняем порядок появления X внутри каждой серии
     for s in series.values():
         zipped = list(zip(s["x"], s["y"]))
-        # сохраняем порядок уникальных X
-        seen, ordered = set(), []
-        for pair in zipped:
-            if pair[0] in seen: 
+        seen = set()
+        ordered = []
+        for xx, yy in zipped:
+            if xx in seen:
                 continue
-            seen.add(pair[0]); ordered.append(pair)
+            seen.add(xx)
+            ordered.append((xx, yy))
         s["x"] = [p[0] for p in ordered]
         s["y"] = [p[1] for p in ordered]
+
     return list(series.values())
+
 
 # ---------- API ----------
 @router.post("/preview")

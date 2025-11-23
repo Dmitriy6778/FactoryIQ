@@ -134,7 +134,8 @@ def copy_sqlite_file() -> str:
     """Копирует SQLite файл. Если UNC недоступен — использует локальный fallback."""
     dst = os.path.join(LOCAL_COPY_DIR, LOCAL_COPY_NAME)
 
-    log(f"Копирую SQLite: {SOURCE_DB_PATH} → {dst}")
+    # БЕЗ юникод-стрелки
+    log(f"Копирую SQLite: {SOURCE_DB_PATH} -> {dst}")
 
     try:
         # Первая попытка — UNC

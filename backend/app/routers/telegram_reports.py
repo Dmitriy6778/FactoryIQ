@@ -349,15 +349,17 @@ def _row_to_task_dict(r) -> Dict[str, Any]:
 
 def _tag_desc_map_for_template(template_id: int) -> Dict[str, str]:
     """
-    Возвращает map по TagName -> Description (fallback: TagName).
-    Требуется таблица OpcTags(Name, Description) и связь ReportTemplateTags(TagId).
+    Возвращает map BrowseName -> Description.
     """
     q = """
-    SELECT t.Name, ISNULL(NULLIF(LTRIM(RTRIM(t.Description)), ''), t.Name) AS Descr
+    SELECT 
+        t.BrowseName AS Name,
+        ISNULL(NULLIF(LTRIM(RTRIM(t.Description)), ''), t.BrowseName) AS Descr
     FROM dbo.ReportTemplateTags rtt
     JOIN dbo.OpcTags t ON t.Id = rtt.TagId
     WHERE rtt.TemplateId = ?
     """
+
     out = {}
     try:
         with _db() as conn:
@@ -367,7 +369,9 @@ def _tag_desc_map_for_template(template_id: int) -> Dict[str, str]:
                 out[str(row.Name)] = str(row.Descr)
     except Exception:
         pass
+
     return out
+
 
 
 def _render_text_rows(rows: List[Dict[str, Any]],
@@ -714,7 +718,9 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
         # =====================================================================
         if period == "weekly":
             now = datetime.now()
-            week_monday = payload.get("week_monday") or (now - timedelta(days=now.weekday())).date().isoformat()
+            week_monday = payload.get("week_monday") or (
+                now - timedelta(days=now.weekday())
+            ).date().isoformat()
 
             meta_params = (meta.get("params") or {})
             pay_params  = (payload.get("params") or {})
@@ -730,41 +736,38 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
             if isinstance(tag_ids, (list, tuple)):
                 tag_ids = ",".join(str(x) for x in tag_ids)
             if not tag_ids:
-                raise HTTPException(status_code=422, detail="weekly: не передан список тегов (@TagIds/@tag_ids)")
+                raise HTTPException(
+                    status_code=422,
+                    detail="weekly: не передан список тегов (@TagIds/@tag_ids)",
+                )
 
             proc_name   = "dbo.sp_Telegram_WeeklyShiftCumulative"
             proc_params = _soft_norm({"@week_monday": week_monday, "@tag_ids": tag_ids})
 
-            # Ожидаем: Period | TagName | CumValue (может быть и TagId)
+            # Ожидаем: Period | TagName | CumValue (+ опционально Description)
             cols, rows = _exec_proc_simple(proc_name, proc_params)
             title = (style.get("chart_title") or payload.get("chart_title") or "").strip()
 
-
-                        # ---------- подготовка служебных значений ----------
-            # weekly-опции из стиля/пейлоуда (поддерживаем и новые поля)
+            # ---------- подготовка служебных значений ----------
             weekly_y_mode = _weekly_mode_from(style, payload)   # "delta" | "cum"
             weekly_div    = _weekly_div_from(style, payload)    # делитель (масштаб)
 
             weekly_unit = (
                 style.get("weekly_unit")
-                or payload.get("weekly_unit")  # <- топ-уровень тоже
+                or payload.get("weekly_unit")
                 or ""
             )
 
-
-            # Добавим: Delta (из CumValue), + scaled поля и Unit
-            # Порядок: YYYY-MM-DD + ('День' < 'Ночь')
+            # добавляем Delta / Scaled в строки
             def _period_key(p: str) -> tuple:
                 d = p[:10]
                 sh = 1 if ("День" in p) else 2
                 return (d, sh)
 
-            # группируем по TagName
             by_tag: Dict[str, list] = {}
             for r in rows:
                 by_tag.setdefault(str(r.get("TagName") or ""), []).append(r)
 
-            # вычисляем Delta и скейлы
             for tag, lst in by_tag.items():
                 lst.sort(key=lambda r: _period_key(str(r.get("Period") or "")))
                 prev_cum = None
@@ -774,24 +777,30 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                         cv = float(cv) if cv is not None else None
                     except Exception:
                         cv = None
+
                     if prev_cum is None:
                         delta = cv
                     else:
-                        delta = (cv - prev_cum) if (cv is not None and prev_cum is not None) else None
+                        delta = (cv - prev_cum) if (
+                            cv is not None and prev_cum is not None
+                        ) else None
                     prev_cum = cv
 
                     r["Delta"] = delta
-                    # scaled
+
                     def _scale(x):
                         try:
-                            return (float(x) / weekly_div) if (x is not None) else None
+                            return (float(x) / weekly_div) if (
+                                x is not None and weekly_div
+                            ) else (float(x) if x is not None else None)
                         except Exception:
                             return None
+
                     r["CumValueScaled"] = _scale(cv)
                     r["DeltaScaled"]    = _scale(delta)
                     r["Unit"]           = weekly_unit
 
-            # ---- TEXT: подставим новые токены ----
+            # ---- TEXT-режим ----
             if is_text:
                 desc_map = _tag_desc_map_for_template(template_id)
 
@@ -808,27 +817,31 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
 
                 txt_tpl = (style.get("text_template") or payload.get("text_template") or "").strip()
                 if not txt_tpl:
-                    # дефолт: показываем дельту (scaled) + единицу
                     txt_tpl = "{Period}  {Description}  {DeltaScaled} {Unit}"
 
-                # для Description (priority: override -> справочник -> TagName)
                 def _resolve_desc(tag_name: str) -> str:
-                    return str(custom.get(tag_name) or desc_map.get(tag_name) or tag_name)
+                    return str(
+                        custom.get(tag_name)
+                        or desc_map.get(tag_name)
+                        or tag_name
+                    )
 
-                # подготовим rows с описанием и токенами
                 prepared = []
                 for r in rows:
                     rn = dict(r)
                     tn = str(r.get("TagName") or "")
-                    rn.setdefault("Description", _resolve_desc(tn))
+                    rn.setdefault(
+                        "Description",
+                        rn.get("Description") or _resolve_desc(tn),
+                    )
                     prepared.append(rn)
 
                 rendered = _render_text_rows(
                     rows=prepared,
                     template=txt_tpl,
-                    weekly_alias=False,   # свои поля уже есть
+                    weekly_alias=False,
                     desc_map=desc_map,
-                    custom_desc=custom
+                    custom_desc=custom,
                 )
 
                 return {
@@ -841,26 +854,42 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     "period": {"mode": "weekly", "week_monday": week_monday},
                 }
 
-            # ---- CHART ----
-            # Формат для _render_bar_simple: [{ "name": str, "x": [...], "y": [...] }, ...]
+            # ---- CHART-режим ----
             desc_map = _tag_desc_map_for_template(template_id)
-            custom = style.get("description_overrides") or payload.get("description_overrides") or {}
+            custom = (
+                style.get("description_overrides")
+                or payload.get("description_overrides")
+                or {}
+            )
             if isinstance(custom, str):
                 try:
                     custom = json.loads(custom)
                 except Exception:
                     custom = {}
 
-            def resolve_name(tag_name: str) -> str:
-                return str(custom.get(tag_name) or desc_map.get(tag_name) or tag_name)
+            def _series_name_from_row(r: Dict[str, Any]) -> str:
+                """
+                Приоритет имени серии:
+                1) Description / Descr / TagDescription из самого результата
+                2) кастом из style_override (description_overrides)
+                3) справочник desc_map (по TagName)
+                4) TagName
+                """
+                tn = str(r.get("TagName") or "")
+                desc = (
+                    r.get("Description")
+                    or r.get("Descr")
+                    or r.get("TagDescription")
+                )
+                if desc:
+                    return str(desc)
+                return str(custom.get(tn) or desc_map.get(tn) or tn)
 
             by_series: Dict[str, Dict[str, list]] = {}
             for r in rows:
-                tn = str(r.get("TagName") or "")
-                nm = resolve_name(tn)
+                nm = _series_name_from_row(r)
                 s = by_series.setdefault(nm, {"name": nm, "x": [], "y": []})
 
-                # Короткая подпись: 20д / 20н вместо полной даты
                 label = _short_period_label(r.get("Period"))
                 s["x"].append(label)
 
@@ -868,11 +897,17 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     yv = r.get("CumValueScaled")
                 else:
                     yv = r.get("DeltaScaled")
-                s["y"].append(yv if yv is not None else 0.0)
+
+                # нули и None -> 0, но подписи будут уже фильтроваться в отрисовщике
+                try:
+                    yv = float(yv) if yv is not None else 0.0
+                except Exception:
+                    yv = 0.0
+
+                s["y"].append(yv)
 
             series = list(by_series.values())
             img_b64 = _render_bar_simple(series, title=title)
-
 
             return {
                 "ok": True,
@@ -882,18 +917,19 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                 "data": rows,
                 "period": {"mode": "weekly", "week_monday": week_monday},
             }
-                # ==== NEW: SHIFT через sp_Telegram_BalanceReport_Shift ===========
+
+        # =====================================================================
+        # SHIFT: особая логика (как было)
+        # =====================================================================
         if period == "shift":
             now = datetime.now()
             today = now.date()
-            # Для предпросмотра берём вчера + сегодня, как ты тестировал в SSMS
             date_to = today
             date_from = today - timedelta(days=1)
 
             meta_params = (meta.get("params") or {})
             pay_params  = (payload.get("params") or {})
 
-            # пытаемся найти tag_ids в payload / meta
             tag_ids = (
                 payload.get("tag_ids") or payload.get("@tag_ids") or
                 payload.get("TagIds") or payload.get("@TagIds") or
@@ -911,7 +947,7 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
             if not tag_ids:
                 raise HTTPException(
                     status_code=422,
-                    detail="shift: не передан список тегов (@TagIds/@tag_ids)"
+                    detail="shift: не передан список тегов (@TagIds/@tag_ids)",
                 )
 
             proc_name   = "dbo.sp_Telegram_BalanceReport_Shift"
@@ -924,7 +960,6 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
             cols, rows = _exec_proc_simple(proc_name, proc_params)
             title = (style.get("chart_title") or payload.get("chart_title") or "").strip()
 
-            # --- TEXT-режим (как ты сейчас используешь) ---
             if is_text:
                 desc_map = _tag_desc_map_for_template(template_id)
 
@@ -939,7 +974,6 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     except Exception:
                         custom = {}
 
-                # если нет своего — дефолтный шаблон
                 txt_tpl = (
                     style.get("text_template")
                     or payload.get("text_template")
@@ -952,7 +986,10 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     tn = str(r.get("TagName") or "")
                     rr.setdefault(
                         "Description",
-                        custom.get(tn) or desc_map.get(tn) or tn
+                        rr.get("Description")
+                        or custom.get(tn)
+                        or desc_map.get(tn)
+                        or tn,
                     )
                     prepared.append(rr)
 
@@ -978,7 +1015,6 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     },
                 }
 
-            # --- если формат не text — просто отдадим таблицу как фолбэк ---
             tbl = _make_text_table_simple(cols, rows, None)
             return {
                 "ok": True,
@@ -993,9 +1029,8 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                 },
             }
 
-
         # =====================================================================
-        # НЕ weekly: через общий превью-движок
+        # НЕ weekly/shift: через общий превью-движок
         # =====================================================================
         chart_kind = style.get("chart_kind") or (
             "bar" if period in ("shift", "daily", "weekly", "monthly") else "line"
@@ -1032,13 +1067,12 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     res.setdefault("text_table", res["text"])
 
         return res
-    
-
 
     except HTTPException:
         raise
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
+
 
 
 # ===== ЕДИНСТВЕННЫЙ стиль на шаблон =====

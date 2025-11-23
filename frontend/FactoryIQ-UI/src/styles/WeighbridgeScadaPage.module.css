@@ -1,0 +1,38 @@
+/* src/styles/WeighbridgePage.module.css */
+
+.page {
+  padding: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.filterCard {
+  margin-bottom: 16px;
+}
+
+.filterLabel {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.topRow {
+  margin-bottom: 16px;
+}
+
+.bottomCard {
+  margin-top: 8px;
+}
+
+.periodTitle {
+  font-size: 12px;
+  color: #888;
+  margin-left: 4px;
+}
+
+.searchRow {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}

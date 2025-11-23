@@ -9,9 +9,6 @@ OPC UA подписочный воркер с:
 - watchdog по тишине OPC UA потока с форс-реконнектом;
 - мягким обращением с транзиентными ошибками SQL (shutdown/only admin/недоступен);
 - heartbeat чтением системного узла OPC UA (ServerStatus.CurrentTime) для «разбудки» тишины.
-- DEADMAN-контролем по отсутствию новых данных в течение DEADMAN_TIMEOUT_SEC:
-  при превышении порога процесс завершает работу (os._exit),
-  что позволяет службе Windows автоматически перезапустить его.
 
 ВАЖНО:
 - Кэш на случай потери связи с БД хранится в папке SPOOL_DIR (по умолчанию ./spool).
@@ -89,31 +86,10 @@ HEARTBEAT_PERIOD_SEC         = float(get_env("HEARTBEAT_PERIOD_SEC", "20"))
 HEARTBEAT_NODE               = get_env("HEARTBEAT_NODE", "i=2258")  # ServerStatus.CurrentTime
 HEARTBEAT_FAILS_FOR_RECONNECT= int(get_env("HEARTBEAT_FAILS_FOR_RECONNECT", "3"))
 
-# DEADMAN-контроль: если нет "жизни данных" дольше DEADMAN_TIMEOUT_SEC — жёсткий выход процесса
-DEADMAN_TIMEOUT_SEC          = int(get_env("DEADMAN_TIMEOUT_SEC", "300"))   # по умолчанию 5 минут
-DEADMAN_CHECK_PERIOD_SEC     = int(get_env("DEADMAN_CHECK_PERIOD_SEC", "30"))
-
 FERNET_KEY = os.getenv("FERNET_KEY")
 if not FERNET_KEY:
     raise RuntimeError("FERNET_KEY not set in environment!")
 fernet = Fernet(FERNET_KEY.encode())
-
-# Глобальные отметки активности по данным (для DEADMAN)
-LAST_DATA_TS = time.time()
-LAST_DATA_LOCK = Lock()
-
-
-def mark_data_activity() -> None:
-    """
-    Отмечает факт "живой" активности по данным:
-    - пришло новое значение по подписке (попало в RAM-буфер);
-    - успешно записали пачку в БД (db_exec_batch / SPOOL replay).
-    DEADMAN смотрит только на этот таймштамп.
-    """
-    global LAST_DATA_TS
-    with LAST_DATA_LOCK:
-        LAST_DATA_TS = time.time()
-
 
 # ========= Логирование =========
 def init_logger() -> logging.Logger:
@@ -142,38 +118,6 @@ def init_logger() -> logging.Logger:
 
 log = init_logger()
 log.info("SPOOL_DIR resolved to: %s", SPOOL_DIR)
-
-# (не обязательно, но можно снизить шум от внутренних логов библиотеки)
-logging.getLogger("opcua").setLevel(logging.ERROR)
-
-# ========= DEADMAN loop =========
-def deadman_loop(stop_event: threading.Event):
-    """
-    Следит за тем, что по данным есть жизнь.
-    Если нет ни одной data-активности дольше DEADMAN_TIMEOUT_SEC -> os._exit(2),
-    чтобы служба Windows перезапустила процесс.
-    """
-    threading.current_thread().name = "deadman"
-    log.info(
-        "DEADMAN: enabled (timeout=%ss, check_period=%ss)",
-        DEADMAN_TIMEOUT_SEC, DEADMAN_CHECK_PERIOD_SEC
-    )
-
-    while not stop_event.is_set():
-        try:
-            with LAST_DATA_LOCK:
-                diff = time.time() - LAST_DATA_TS
-            if diff > DEADMAN_TIMEOUT_SEC:
-                log.critical(
-                    "DEADMAN: no data activity for %.1f seconds (> %s) -> hard exit for service restart",
-                    diff, DEADMAN_TIMEOUT_SEC
-                )
-                # Жёстко завершаем процесс, чтобы не осталось зависших потоков.
-                os._exit(2)
-        except Exception as ex:
-            log.error("DEADMAN loop error: %r", ex, exc_info=True)
-        time.sleep(DEADMAN_CHECK_PERIOD_SEC)
-
 
 # ========= Утилиты диагностики БД =========
 def is_transient_db_down(ex: Exception) -> bool:
@@ -297,8 +241,6 @@ def spool_replay_loop(stop_event: threading.Event):
                     continue
                 try:
                     db_exec_batch(conn, rows)
-                    # успешная запись старых данных в БД — тоже "жизнь"
-                    mark_data_activity()
                     try: f.unlink(missing_ok=True)
                     except Exception: pass
                     log.info("SPOOL: replay OK -> %s (rows=%d)", f.name, len(rows))
@@ -596,10 +538,6 @@ def db_exec_batch(conn: pyodbc.Connection, rows: List[Tuple[int, float, datetime
         log.info("DB: commit OK, inserted_rows_reported=%d, expected=%d",
                  total_inserted, len(rows))
 
-        # успешная запись — явно помечаем активность данных
-        if total_inserted > 0:
-            mark_data_activity()
-
         # Быстрый “count-check”
         if verify_mode in ("count", "strict") and total_inserted < len(rows):
             log.error("DB VERIFY(count): mismatch inserted=%d < expected=%d",
@@ -738,10 +676,6 @@ class SubHandler(object):
             self.last_value_by_tid[tid] = qval
             n = self.buf.push((tid, qval, ts, "Good" if "Good" in status else status))
             self.last_event_ts = time.time()
-
-            # Любое новое значение — считаем живой активностью по данным
-            mark_data_activity()
-
             if n % 2000 == 0:
                 log.info("SubBuffer size=%d (task stream)", n)
 
@@ -1076,24 +1010,9 @@ def polling_worker():
     running: Dict[int, Dict[str, object]] = {}
     missing: Dict[int, int] = {}
 
-    # общий stop-флаг для фоновых потоков
-    stop_replay = threading.Event()
-
     # запускаем фоновый поток спул-реплея
-    threading.Thread(
-        target=spool_replay_loop,
-        args=(stop_replay,),
-        daemon=True,
-        name="spool-replay"
-    ).start()
-
-    # DEADMAN по данным
-    threading.Thread(
-        target=deadman_loop,
-        args=(stop_replay,),
-        daemon=True,
-        name="deadman"
-    ).start()
+    stop_replay = threading.Event()
+    threading.Thread(target=spool_replay_loop, args=(stop_replay,), daemon=True, name="spool-replay").start()
 
     while True:
         active_ids = set()
@@ -1199,4 +1118,5 @@ def polling_worker():
         time.sleep(5 + random.uniform(0, 0.75))
 
 if __name__ == "__main__":
+
     polling_worker()

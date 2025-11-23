@@ -131,6 +131,90 @@ const defaultColors = [
   "#bd93f9",
 ];
 
+/** Максимальное значение Y среди всех точек (для suggestedMax) */
+function computeMaxY(
+  data:
+    | { x?: any; y?: number; value?: number; label?: string; r?: number }[]
+    | { label: string; data: { x?: any; y?: number }[] }[]
+): number {
+  let max = 0;
+
+  if (!Array.isArray(data) || data.length === 0) return max;
+
+  // случай: [{ label, data: [...] }, ...]
+  if ("data" in (data[0] as any)) {
+    (data as any[]).forEach((set) => {
+      (set.data || []).forEach((p: any) => {
+        const v =
+          typeof p === "number"
+            ? p
+            : typeof p.y === "number"
+            ? p.y
+            : typeof p.value === "number"
+            ? p.value
+            : null;
+        if (v != null && isFinite(v) && v > max) max = v;
+      });
+    });
+  } else {
+    // случай: [{ x, y }, ...]
+    (data as any[]).forEach((p: any) => {
+      const v =
+        typeof p === "number"
+          ? p
+          : typeof p.y === "number"
+          ? p.y
+          : typeof p.value === "number"
+          ? p.value
+          : null;
+      if (v != null && isFinite(v) && v > max) max = v;
+    });
+  }
+
+  return max;
+}
+
+/** Плагин: подписи значений над барами */
+const valueLabelPlugin = {
+  id: "valueLabelPlugin",
+  afterDatasetsDraw: (chart: any) => {
+    const { ctx } = chart;
+    ctx.save();
+
+    chart.data.datasets.forEach((dataset: any, datasetIndex: number) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden) return;
+
+      meta.data.forEach((element: any, index: number) => {
+        const raw = dataset.data[index];
+        const v =
+          typeof raw === "number"
+            ? raw
+            : typeof raw?.y === "number"
+            ? raw.y
+            : typeof raw?.value === "number"
+            ? raw.value
+            : null;
+
+        if (v == null || !isFinite(v)) return;
+
+        const label = v.toFixed(1); // либо .toFixed(0) если нужны только целые
+
+        const x = element.x;
+        const y = element.y - 4; // чуть выше вершины столбца
+
+        ctx.fillStyle = "#333";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(label, x, y);
+      });
+    });
+
+    ctx.restore();
+  },
+};
+
 const Charts: React.FC<ChartsProps> = ({
   data,
   chartType = "line",
@@ -155,9 +239,9 @@ const Charts: React.FC<ChartsProps> = ({
   height = 340,
   width = "100%",
   onPointClick,
-  maxBarThickness = 40,
-  barPercentage = 1.0,
-  categoryPercentage = 1.0,
+  maxBarThickness = 60,
+  barPercentage = 0.8,
+  categoryPercentage = 0.7,
   seriesColors,
 }) => {
   const chartRef = useRef<any>(null);
@@ -180,10 +264,12 @@ const Charts: React.FC<ChartsProps> = ({
 
   const sampleData =
     Array.isArray(data[0]) ||
-    ("data" in data[0] ? (data[0] as any).data : data);
+    ("data" in (data[0] as any) ? (data[0] as any).data : data);
   const isTime =
-    typeof sampleData[0]?.x === "string" &&
-    /^\d{4}-\d{2}-\d{2}/.test(sampleData[0]?.x);
+    typeof (sampleData as any[])[0]?.x === "string" &&
+    /^\d{4}-\d{2}-\d{2}/.test((sampleData as any[])[0]?.x);
+
+  const maxY = computeMaxY(data);
 
   let datasets: any[] = [];
 
@@ -203,7 +289,7 @@ const Charts: React.FC<ChartsProps> = ({
     ];
   } else if (chartType === "bubble") {
     datasets =
-      Array.isArray(data) && "data" in data[0]
+      Array.isArray(data) && "data" in (data[0] as any)
         ? (data as any[]).map((set: any, i: number) => ({
             label: set.label,
             data: set.data,
@@ -224,7 +310,7 @@ const Charts: React.FC<ChartsProps> = ({
           ];
   } else {
     datasets =
-      Array.isArray(data) && "data" in data[0]
+      Array.isArray(data) && "data" in (data[0] as any)
         ? (data as any[]).map((set: any, i: number) => ({
             label: set.label,
             data: set.data,
@@ -307,8 +393,22 @@ const Charts: React.FC<ChartsProps> = ({
   const commonOptions: any = {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: {
+        top: 20, // место над столбцами под подписи
+      },
+    },
     plugins: {
-      legend: { display: showLegend, labels: { color: "#26384E" } },
+      legend: {
+        display: showLegend,
+        position: "bottom",
+        align: "center",
+        labels: {
+          color: "#26384E",
+          boxWidth: 12,
+          padding: 10,
+        },
+      },
       tooltip: {
         enabled: showTooltip,
         callbacks: {
@@ -377,6 +477,7 @@ const Charts: React.FC<ChartsProps> = ({
               grid: { display: showGrid, color: "#e2eef3" },
               title: { display: !!yTitle, text: yTitle, color: "#26384E" },
               ticks: { color: "#7b8692", display: showYTicks },
+              suggestedMax: maxY ? maxY * 1.15 : undefined, // небольшой запас сверху
             },
           },
     elements: {
@@ -399,7 +500,7 @@ const Charts: React.FC<ChartsProps> = ({
         const points = getElementAtEvent(chartRef.current, evt);
         if (points.length) {
           const i = points[0].index;
-          onPointClick(data[i]);
+          onPointClick((data as any[])[i]);
         }
       }
     },
@@ -450,6 +551,7 @@ const Charts: React.FC<ChartsProps> = ({
     data: chartJsData,
     options: commonOptions,
     ref: chartRef,
+    plugins: chartType === "bar" ? [valueLabelPlugin] : [],
   };
 
   return (

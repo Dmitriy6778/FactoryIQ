@@ -26,6 +26,7 @@ import MaintenanceLogPage from "./pages/MaintenanceLogPage";
 import UserScreensPage from "./pages/UserScreensPage";
 import UserScreenEditor from "./pages/UserScreenEditor";
 import WeighbridgePage from "./pages/WeighbridgePage";
+import WeighbridgeScadaPage from "./pages/WeighbridgeScadaPage";
 
 const App: React.FC = () => (
   <Routes>
@@ -34,6 +35,8 @@ const App: React.FC = () => (
     <Route path="/login" element={<LoginPage />} />
     <Route path="/maintenance/ui" element={<MaintenanceLogPage />} />
 <Route path="/weighbridge" element={<WeighbridgePage />} />
+<Route path="/weighbridge-scada" element={<WeighbridgeScadaPage /> }
+/>
     {/* ----------- Защищённые маршруты ----------- */}
     <Route
       path="/"

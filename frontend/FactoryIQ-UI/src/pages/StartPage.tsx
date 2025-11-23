@@ -114,7 +114,15 @@ const StartPage: React.FC = () => {
           >
             <Scale3D size={22} /> Данные автовесов
           </button>
-        
+     {/* 
+          <button
+            className={`btn ${styles.fullBtn}`}
+            onClick={() => navigate("/weighbridge-scada")}
+          >
+            🚛 Данные автовесов
+          </button>
+    */}
+
 
         {hasPerm("Settings.Manage") && (
           <div className={styles.tile} onClick={() => navigate("/monitor/services")}>
