@@ -718,9 +718,17 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
         # =====================================================================
         if period == "weekly":
             now = datetime.now()
-            week_monday = payload.get("week_monday") or (
-                now - timedelta(days=now.weekday())
-            ).date().isoformat()
+
+            # если явно передали week_monday – уважаем его
+            if payload.get("week_monday"):
+                week_monday = str(payload["week_monday"])
+            else:
+                # базовый понедельник ТЕКУЩЕЙ недели
+                base_monday = (now - timedelta(days=now.weekday())).date()
+                # для отчётов берём ИМЕННО ПРОШЛУЮ завершённую неделю
+                week_monday = (base_monday - timedelta(days=7)).isoformat()
+            
+
 
             meta_params = (meta.get("params") or {})
             pay_params  = (payload.get("params") or {})
