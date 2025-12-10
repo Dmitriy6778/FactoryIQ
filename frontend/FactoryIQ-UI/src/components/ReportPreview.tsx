@@ -216,9 +216,17 @@ const ReportPreview: React.FC<{ payload: PreviewPayload }> = ({ payload }) => {
   if (view.type === "text") {
     return (
       <div className={styles.textBox}>
-        <pre className={styles.textPre}>
-          {view.payload.text || "нет данных"}
-        </pre>
+        {/* Маркдаун-код-блоки: ```table``` */}
+{String(view.payload.text).startsWith("```") ? (
+    <pre className={styles.codeBlock}>
+        {view.payload.text.replace(/^```/, "").replace(/```$/, "")}
+    </pre>
+) : (
+    <pre className={styles.textPre}>
+        {view.payload.text || "нет данных"}
+    </pre>
+)}
+
       </div>
     );
   }

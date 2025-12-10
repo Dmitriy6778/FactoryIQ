@@ -76,7 +76,7 @@ SPOOL_FILE_PREFIX          = "opc_spool"
 SPOOL_FILE_SUFFIX          = ".ndjson"
 
 # Таймауты БД (сек)
-ODBC_LOGIN_TIMEOUT_SEC     = int(get_env("ODBC_LOGIN_TIMEOUT_SEC", "5"))   # логин-таймаут
+ODBC_LOGIN_TIMEOUT_SEC     = int(get_env("ODBC_LOGIN_TIMEOUT_SEC", "30"))   # логин-таймаут
 ODBC_QUERY_TIMEOUT_SEC     = int(get_env("ODBC_QUERY_TIMEOUT_SEC", "5"))   # таймаут на execute/commit (на уровне conn)
 DB_CONNECT_MAX_WAIT_SEC    = int(get_env("DB_CONNECT_MAX_WAIT_SEC", "20")) # общий дедлайн на попытки коннекта
 
@@ -92,6 +92,9 @@ HEARTBEAT_FAILS_FOR_RECONNECT= int(get_env("HEARTBEAT_FAILS_FOR_RECONNECT", "3")
 # DEADMAN-контроль: если нет "жизни данных" дольше DEADMAN_TIMEOUT_SEC — жёсткий выход процесса
 DEADMAN_TIMEOUT_SEC          = int(get_env("DEADMAN_TIMEOUT_SEC", "300"))   # по умолчанию 5 минут
 DEADMAN_CHECK_PERIOD_SEC     = int(get_env("DEADMAN_CHECK_PERIOD_SEC", "30"))
+
+THREAD_REGISTRY = {}
+THREAD_REGISTRY_LOCK = Lock()
 
 FERNET_KEY = os.getenv("FERNET_KEY")
 if not FERNET_KEY:
@@ -149,10 +152,12 @@ logging.getLogger("opcua").setLevel(logging.ERROR)
 # ========= DEADMAN loop =========
 def deadman_loop(stop_event: threading.Event):
     """
-    Следит за тем, что по данным есть жизнь.
-    Если нет ни одной data-активности дольше DEADMAN_TIMEOUT_SEC -> os._exit(2),
-    чтобы служба Windows перезапустила процесс.
+    Расширенный DEADMAN:
+    1) Контролирует отсутствие data-активности (как раньше).
+    2) Дополнительно следит за смертью SUB-потоков.
+    При любом сбое выполняет os._exit(), чтобы Windows Service перезапустил процесс.
     """
+
     threading.current_thread().name = "deadman"
     log.info(
         "DEADMAN: enabled (timeout=%ss, check_period=%ss)",
@@ -161,18 +166,38 @@ def deadman_loop(stop_event: threading.Event):
 
     while not stop_event.is_set():
         try:
+            now = time.time()
+
+            # === 1. Проверка активности данных ===
             with LAST_DATA_LOCK:
-                diff = time.time() - LAST_DATA_TS
+                diff = now - LAST_DATA_TS
+
             if diff > DEADMAN_TIMEOUT_SEC:
                 log.critical(
                     "DEADMAN: no data activity for %.1f seconds (> %s) -> hard exit for service restart",
                     diff, DEADMAN_TIMEOUT_SEC
                 )
-                # Жёстко завершаем процесс, чтобы не осталось зависших потоков.
                 os._exit(2)
+
+            # === 2. Проверка состояния потоков подписки ===
+            with THREAD_REGISTRY_LOCK:
+                dead_threads = [
+                    tid for tid, th in THREAD_REGISTRY.items()
+                    if not th.is_alive()
+                ]
+
+            if dead_threads:
+                log.critical(
+                    "DEADMAN: detected dead OPC SUB threads: %s -> hard exit",
+                    dead_threads
+                )
+                os._exit(3)
+
         except Exception as ex:
             log.error("DEADMAN loop error: %r", ex, exc_info=True)
+
         time.sleep(DEADMAN_CHECK_PERIOD_SEC)
+
 
 
 # ========= Утилиты диагностики БД =========
@@ -197,20 +222,44 @@ def is_transient_db_down(ex: Exception) -> bool:
 class FileSpool:
     """
     Персистентный буфер (кэш на диске) для неуспешных вставок в БД.
-    - На запись в БД упали -> сохраняем пачку в .ndjson файл (1 строка = 1 JSON-объект).
-    - Фоновой поток периодически пытается эти файлы «реплеить» в БД и удаляет после успеха.
+    Усиленный:
+    - гарантированное создание каталога на каждом вызове;
+    - автоматическое восстановление каталога при удалении или блокировке;
+    - повторная попытка записи;
+    - безопасная обработка ошибок, чтобы не "убить" поток SUB.
     """
+
     def __init__(self, base_dir: Path):
         self.dir = base_dir
-        self.dir.mkdir(parents=True, exist_ok=True)
         self.lock = Lock()
+        self._ensure_dir()
+
+    def _ensure_dir(self):
+        """Гарантирует существование каталога."""
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+        except Exception as ex:
+            log.critical("SPOOL: cannot create directory %s: %r", self.dir, ex)
+
+    def _safe_open(self, fpath: Path):
+        """Пытается открыть файл безопасно, с восстановлением каталога."""
+        try:
+            return open(fpath, "w", encoding="utf-8")
+        except FileNotFoundError:
+            log.error("SPOOL: directory missing, recreating...")
+            self._ensure_dir()
+            return open(fpath, "w", encoding="utf-8")
 
     def dump_batch(self, task_id: int, rows: List[Tuple[int, float, datetime, str]]) -> Optional[Path]:
         if not rows:
             return None
+
+        self._ensure_dir()
+
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
         fname = f"{SPOOL_FILE_PREFIX}_task{task_id}_{ts}_{uuid.uuid4().hex}{SPOOL_FILE_SUFFIX}"
         fpath = self.dir / fname
+
         payload = []
         for tid, val, dt, st in rows:
             iso = dt.isoformat() if isinstance(dt, datetime) else str(dt)
@@ -218,39 +267,100 @@ class FileSpool:
                 {"TagId": int(tid), "Value": float(val), "Timestamp": iso, "Status": str(st)},
                 ensure_ascii=False
             ))
-        with self.lock:
-            with open(fpath, "w", encoding="utf-8") as f:
-                f.write("\n".join(payload))
-        log.warning("SPOOL: batch persisted -> %s (rows=%d)", fpath.name, len(rows))
-        return fpath
+
+        try:
+            with self.lock:
+                with self._safe_open(fpath) as f:
+                    f.write("\n".join(payload))
+
+            log.warning("SPOOL: batch persisted -> %s (rows=%d)", fpath.name, len(rows))
+            return fpath
+
+        except Exception as ex:
+            log.critical("SPOOL: FAILED to write batch even after recovery: %r", ex, exc_info=True)
+            return None
 
     def list_ready_files(self) -> List[Path]:
+        self._ensure_dir()
         with self.lock:
             return sorted(self.dir.glob(f"{SPOOL_FILE_PREFIX}_*{SPOOL_FILE_SUFFIX}"))
-
     def read_file_rows(self, fpath: Path) -> List[Tuple[int, float, datetime, str]]:
+        """
+        Читает .ndjson файл спула и возвращает список кортежей:
+        (TagId, Value, Timestamp, Status).
+        """
         rows: List[Tuple[int, float, datetime, str]] = []
-        with open(fpath, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    obj = json.loads(line)
-                    tid = int(obj["TagId"])
-                    val = float(obj["Value"])
-                    ts  = obj["Timestamp"]
-                    if isinstance(ts, str):
-                        d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                        if d.tzinfo is not None:
-                            d = d.astimezone(timezone.utc).replace(tzinfo=None)
-                        ts = d
-                    st  = str(obj.get("Status", "Good"))
-                    rows.append((tid, val, ts, st))
-                except Exception as ex:
-                    log.error("SPOOL: bad line in %s: %r", fpath.name, ex, exc_info=True)
+
+        try:
+            with self.lock:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            tid = int(obj["TagId"])
+                            val = float(obj["Value"])
+                            ts  = obj["Timestamp"]
+                            # timestamp может быть строкой — конвертим:
+                            if isinstance(ts, str):
+                                try:
+                                    ts = datetime.fromisoformat(ts)
+                                except Exception:
+                                    ts = datetime.utcnow()
+                            status = str(obj.get("Status", "Good"))
+                            rows.append((tid, val, ts, status))
+                        except Exception as ex:
+                            log.error("SPOOL: bad line in %s -> %r", fpath.name, ex)
+                            continue
+        except Exception as ex:
+            log.error("SPOOL: read_file_rows error: %r", ex, exc_info=True)
+
         return rows
 
+
 SPOOL = FileSpool(SPOOL_DIR)
+
+def sanitize_spool_directory():
+    """Удаляет битые, пустые и устаревшие spool-файлы."""
+    try:
+        SPOOL._ensure_dir()
+        now = time.time()
+        bad_dir = SPOOL.dir / "bad"
+        bad_dir.mkdir(exist_ok=True)
+
+        for f in SPOOL.dir.glob("*.ndjson"):
+            # Skip folders
+            if not f.is_file():
+                continue
+
+            # Удаляем пустые файлы
+            if f.stat().st_size == 0:
+                log.warning("SPOOL SANITIZE: removing empty file %s", f)
+                f.unlink(missing_ok=True)
+                continue
+
+            # Удаляем слишком старые файлы (например > 24ч)
+            if now - f.stat().st_mtime > 24*3600:
+                log.warning("SPOOL SANITIZE: moving stale file to bad/: %s", f.name)
+                f.rename(bad_dir / f.name)
+                continue
+
+            # Проверка JSON-валидности первых строк
+            try:
+                with open(f, "r", encoding="utf-8") as ff:
+                    for i in range(5):  # проверяем первые 5 записей
+                        line = ff.readline()
+                        if not line:
+                            break
+                        json.loads(line)
+            except Exception:
+                log.error("SPOOL SANITIZE: corrupted file -> moving to bad/: %s", f.name)
+                f.rename(bad_dir / f.name)
+
+    except Exception as ex:
+        log.error("SPOOL SANITIZE error: %r", ex, exc_info=True)
+
 
 def reconnect(conn_ref: list) -> bool:
     try:
@@ -583,6 +693,22 @@ def db_exec_batch(conn: pyodbc.Connection, rows: List[Tuple[int, float, datetime
         for i in range(0, len(rows), DB_INSERT_CHUNK_SIZE):
             part = rows[i:i+DB_INSERT_CHUNK_SIZE]
             cur.fast_executemany = True
+            retry = 0
+            max_retry = 3
+
+            while True:
+                try:
+                    cur.fast_executemany = True
+                    
+                    break  # success
+
+                except pyodbc.OperationalError as ex:
+                    if retry < max_retry:
+                        log.warning("DB INSERT retry %d/%d due to %r", retry+1, max_retry, ex)
+                        retry += 1
+                        time.sleep(0.2 * retry)
+                        continue
+                    raise ex
             cur.executemany(
                 "INSERT INTO dbo.OpcData (TagId, Value, [Timestamp], [Status]) VALUES (?, ?, ?, ?)",
                 part
@@ -854,15 +980,27 @@ def poll_task_sub(task_id: int,
 
         # подпишем новые
         if to_add:
-            nodes = [client.get_node(nid) for nid in to_add]
-            try:
-                si = max(100.0, float(interval_seconds) * 1000.0)  # sampling interval (мс)
-                handles = subscribe_data_change_compat(sub, nodes, si_ms=si, qsize=SUB_QUEUE_SIZE)
-                for nid, h in zip(to_add, handles):
-                    node_handle_by_id[nid] = h
-                    subscribed_nodeids.add(nid)
-            except Exception as ex:
-                log.error("Task #%s: subscribe_data_change failed: %r", task_id, ex, exc_info=True)
+            valid_nids = []
+            nodes = []
+            for nid in to_add:
+                try:
+                    node = client.get_node(nid)
+                    node.get_data_type()
+                    nodes.append(node)
+                    valid_nids.append(nid)
+                except Exception:
+                    log.error("Task #%s: invalid NodeId removed: %s", task_id, nid)
+
+            if nodes:
+                try:
+                    si = max(100.0, float(interval_seconds) * 1000.0)
+                    handles = subscribe_data_change_compat(sub, nodes, si_ms=si, qsize=SUB_QUEUE_SIZE)
+                    for nid, h in zip(valid_nids, handles):
+                        node_handle_by_id[nid] = h
+                        subscribed_nodeids.add(nid)
+                except Exception as ex:
+                    log.error("Task #%s: subscribe_data_change failed: %r", task_id, ex, exc_info=True)
+
 
         # отпишем удалённые
         if to_del:
@@ -1021,14 +1159,28 @@ def poll_task_sub(task_id: int,
 
                 # watchdog: если тишина дольше LIVENESS_DEAD_SEC И подряд упало несколько heartbeat — реконнект
                 silent_sec = time.time() - handler.last_event_ts
-                if silent_sec > LIVENESS_DEAD_SEC and hb_fail_streak >= HEARTBEAT_FAILS_FOR_RECONNECT:
-                    log.error("Task #%s: Watchdog: silent %ss and heartbeat fails x%d -> force reconnect",
-                              task_id, LIVENESS_DEAD_SEC, hb_fail_streak)
-                    raise RuntimeError(
-                        f"No data/keepalive > {LIVENESS_DEAD_SEC}s (HB fails x{hb_fail_streak}) -> force reconnect"
-                    )
 
-                time.sleep(0.1)
+            # режим подмёрзшей подписки: heartbeat есть, а datachange нет
+                subscription_frozen = (
+                    silent_sec > LIVENESS_DEAD_SEC and
+                    hb_fail_streak == 0  # сервер отвечает, но подписка молчит
+                )
+
+                if subscription_frozen:
+                    log.error(
+                        "Task #%s: subscription freeze detected (silent=%ss, heartbeat OK). "
+                        "Performing soft-reconnect...",
+                        task_id, int(silent_sec)
+                    )
+                    raise RuntimeError("Subscription freeze -> reconnect")
+
+                # режим повреждения OPC-сессии
+                if silent_sec > LIVENESS_DEAD_SEC and hb_fail_streak >= HEARTBEAT_FAILS_FOR_RECONNECT:
+                    log.error(
+                        "Task #%s: Watchdog: silent %ss and heartbeat fails x%d -> force full reconnect",
+                        task_id, int(silent_sec), hb_fail_streak
+                    )
+                    raise RuntimeError("No data/keepalive -> reconnect")
 
         except Exception as e:
             if is_transient_db_down(e):
@@ -1078,7 +1230,7 @@ def polling_worker():
 
     # общий stop-флаг для фоновых потоков
     stop_replay = threading.Event()
-
+    sanitize_spool_directory()
     # запускаем фоновый поток спул-реплея
     threading.Thread(
         target=spool_replay_loop,
@@ -1170,6 +1322,12 @@ def polling_worker():
                         )
 
                         th.start()
+                        with THREAD_REGISTRY_LOCK:
+                            THREAD_REGISTRY[task_id] = th
+
+                        running[task_id] = {"thread": th, "stop_event": stop_event}
+                        log.info("Started task #%s (%s, interval=%ss, tags=%s)",
+                                task_id, server_url, interval_sec, len(tag_nodeids))
                         running[task_id] = {"thread": th, "stop_event": stop_event}
                         log.info("Started task #%s (%s, interval=%ss, tags=%s)",
                                  task_id, server_url, interval_sec, len(tag_nodeids))

@@ -142,7 +142,7 @@ function Step-FrontendBuildAndDeploy {
     [string]$ProdWebRoot = $FrontProd
   )
 
-  Write-Host "=== FRONTEND: build & deploy (PRODUCTION) ===" -ForegroundColor Green
+  Write-Host "=== FRONTEND: build & deploy (dev mode) ===" -ForegroundColor Green
   if (-not (Test-Path -Path $DevClient)) {
     throw ("Frontend folder not found: {0}" -f $DevClient)
   }
@@ -173,10 +173,9 @@ function Step-FrontendBuildAndDeploy {
       Write-Host "node_modules present → skipping npm install" -ForegroundColor Cyan
     }
 
-    # Production build
     $oldNodeEnvBuild = $env:NODE_ENV
-    $env:NODE_ENV = 'production'
-    try { npm run build -- --mode production } finally {
+    $env:NODE_ENV = 'development'
+    try { npm run build -- --mode development } finally {
       if ($null -ne $oldNodeEnvBuild) { $env:NODE_ENV = $oldNodeEnvBuild } else { Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue }
     }
 
@@ -197,7 +196,7 @@ function Step-FrontendBuildAndDeploy {
     $prodIndex = Join-Path $ProdWebRoot "index.html"
     if (-not (Test-Path $prodIndex)) { throw ("Deployed index.html missing at {0}" -f $prodIndex) }
 
-    Write-Host "OK: frontend built (production) and deployed to $ProdWebRoot" -ForegroundColor Green
+    Write-Host "OK: frontend built (dev mode) and deployed to $ProdWebRoot" -ForegroundColor Green
   }
   finally { Pop-Location }
 }
@@ -358,42 +357,42 @@ function Do-Services {
   & nssm start $SvcRpt | Out-Null
   Ok 'Service ready: factoryiq-reports'
 
-  # --- CADDYFILE: не перезаписываем, если уже есть и Preserve включен ---
+# --- CADDYFILE: не перезаписываем, если уже есть и Preserve включен ---
 
-  # Порт 443 свободен?
-  $p443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($p443) { Warn ("Port 443 is already in use by PID={0}." -f $p443.OwningProcess) }
+# Порт 443 свободен?
+$p443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($p443) { Warn ("Port 443 is already in use by PID={0}." -f $p443.OwningProcess) }
 
-  # Чистая регистрация службы
-  try { sc.exe stop   $SvcCaddy | Out-Null } catch {}
-  Start-Sleep -Seconds 2
-  try { sc.exe delete $SvcCaddy | Out-Null } catch {}
+# Чистая регистрация службы
+try { sc.exe stop   $SvcCaddy | Out-Null } catch {}
+Start-Sleep -Seconds 2
+try { sc.exe delete $SvcCaddy | Out-Null } catch {}
 
-  $fiqData   = Join-Path $env:ProgramData 'FactoryIQ'
-  New-Item -ItemType Directory -Force -Path (Join-Path $fiqData 'logs') | Out-Null
+$fiqData   = Join-Path $env:ProgramData 'FactoryIQ'
+New-Item -ItemType Directory -Force -Path (Join-Path $fiqData 'logs') | Out-Null
 
-  # Важно: РОВНО эта строка параметров (как в «старой рабочей» версии)
-  & nssm install $SvcCaddy $CaddyExe "run --config `"$Caddyfile`" --adapter caddyfile" | Out-Null
-  & nssm set     $SvcCaddy AppDirectory $CaddyDir | Out-Null
-  & nssm set     $SvcCaddy AppStdout    (Join-Path $fiqData 'logs\caddy.out.log') | Out-Null
-  & nssm set     $SvcCaddy AppStderr    (Join-Path $fiqData 'logs\caddy.err.log') | Out-Null
-  & nssm set     $SvcCaddy AppRotateFiles 1 | Out-Null
-  & nssm set     $SvcCaddy AppRotateOnline 1 | Out-Null
-  & nssm set     $SvcCaddy AppRotateBytes 10485760 | Out-Null
+# Важно: РОВНО эта строка параметров (как в «старой рабочей» версии)
+& nssm install $SvcCaddy $CaddyExe "run --config `"$Caddyfile`" --adapter caddyfile" | Out-Null
+& nssm set     $SvcCaddy AppDirectory $CaddyDir | Out-Null
+& nssm set     $SvcCaddy AppStdout    (Join-Path $fiqData 'logs\caddy.out.log') | Out-Null
+& nssm set     $SvcCaddy AppStderr    (Join-Path $fiqData 'logs\caddy.err.log') | Out-Null
+& nssm set     $SvcCaddy AppRotateFiles 1 | Out-Null
+& nssm set     $SvcCaddy AppRotateOnline 1 | Out-Null
+& nssm set     $SvcCaddy AppRotateBytes 10485760 | Out-Null
 
-  # Анти-pause/троттлинг — проверенные настройки для NSSM
-  & nssm set     $SvcCaddy AppNoConsole         1 | Out-Null
-  & nssm set     $SvcCaddy AppStopMethodConsole 0 | Out-Null
-  & nssm set     $SvcCaddy AppStopMethodWindow  0 | Out-Null
-  & nssm set     $SvcCaddy AppStopMethodThreads 0 | Out-Null
-  & nssm set     $SvcCaddy AppKillProcessTree   1 | Out-Null
-  & nssm set     $SvcCaddy AppExit Default      Restart | Out-Null
-  & nssm set     $SvcCaddy AppRestartDelay      5000 | Out-Null
-  & nssm set     $SvcCaddy AppThrottle          0 | Out-Null
+# Анти-pause/троттлинг — проверенные настройки для NSSM
+& nssm set     $SvcCaddy AppNoConsole         1 | Out-Null
+& nssm set     $SvcCaddy AppStopMethodConsole 0 | Out-Null
+& nssm set     $SvcCaddy AppStopMethodWindow  0 | Out-Null
+& nssm set     $SvcCaddy AppStopMethodThreads 0 | Out-Null
+& nssm set     $SvcCaddy AppKillProcessTree   1 | Out-Null
+& nssm set     $SvcCaddy AppExit Default      Restart | Out-Null
+& nssm set     $SvcCaddy AppRestartDelay      5000 | Out-Null
+& nssm set     $SvcCaddy AppThrottle          0 | Out-Null
 
-  & nssm set     $SvcCaddy Start SERVICE_AUTO_START | Out-Null
-  & nssm start   $SvcCaddy | Out-Null
-  Ok "Service ready: $SvcCaddy"
+& nssm set     $SvcCaddy Start SERVICE_AUTO_START | Out-Null
+& nssm start   $SvcCaddy | Out-Null
+Ok "Service ready: $SvcCaddy"
 
 
   # WATCHDOG (NEW)

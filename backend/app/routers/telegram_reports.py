@@ -637,28 +637,61 @@ def _weekly_div_from(style: dict, payload: dict) -> float:
         div = 1.0
     return div
 
+def _weekly_tag_scales_from(style: dict, payload: dict) -> Dict[str, float]:
+    """
+    Читает карту делителей для weekly по тегам:
+    weekly_tag_scale: { "AccWeight": 1000, "FT_E0125H_01_ACC": 1, "50177": 1000, ... }
+    Ключи могут быть TagName или TagId (строкой).
+    """
+    src = (
+        style.get("weekly_tag_scale")
+        or payload.get("weekly_tag_scale")
+        or {}
+    )
 
-def _short_period_label(p) -> str:
+    if isinstance(src, str):
+        try:
+            src = json.loads(src)
+        except Exception:
+            src = {}
+
+    out: Dict[str, float] = {}
+    if isinstance(src, dict):
+        for k, v in src.items():
+            try:
+                num = float(v)
+            except Exception:
+                continue
+            if num > 0:
+                out[str(k)] = num
+    return out
+
+
+
+def _short_period_label(p):
     """
-    '2025-11-20 День' -> '20д'
-    '2025-11-21 Ночь' -> '21н'
-    Если что-то пошло не так — возвращаем исходную строку.
+    '2025-12-01 День' -> '1д'
+    '2025-12-01 Ночь' -> '1н'
     """
-    s = str(p or "")
-    if len(s) < 10:
+    if not p:
+        return ""
+
+    s = str(p)
+    parts = s.split()
+    if len(parts) < 2:
         return s
+
+    date_str, shift = parts[0], parts[1]
+
     try:
-        date_part = s[:10]
-        day = int(date_part.split("-")[2])
-    except Exception:
+        day = int(date_str.split("-")[2])
+    except:
         return s
 
-    low = s.lower()
-    suf = "д"
-    if "ноч" in low:
-        suf = "н"
+    suffix = "д" if ("день" in shift.lower()) else "н"
 
-    return f"{day}{suf}"
+    return f"{day}{suffix}"
+
 
 
 @router.post("/preview")
@@ -719,17 +752,25 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
         if period == "weekly":
             now = datetime.now()
 
-            # если явно передали week_monday – уважаем его
+            # Если явно передали неделю — используем её
             if payload.get("week_monday"):
                 week_monday = str(payload["week_monday"])
             else:
-                # базовый понедельник ТЕКУЩЕЙ недели
-                base_monday = (now - timedelta(days=now.weekday())).date()
-                # для отчётов берём ИМЕННО ПРОШЛУЮ завершённую неделю
-                week_monday = (base_monday - timedelta(days=7)).isoformat()
-            
+                # Определяем понедельник
+                weekday = now.weekday()  # Monday = 0
+                monday_this_week = (now.date() - timedelta(days=weekday))
 
+                # ЛОГИКА:
+                #  - если сегодня ПОНЕДЕЛЬНИК → отчёт за ПРОШЛУЮ неделю
+                #  - иначе → текущая неделя
+                if weekday == 0:
+                    monday_for_report = monday_this_week - timedelta(days=7)
+                else:
+                    monday_for_report = monday_this_week
 
+                week_monday = monday_for_report.isoformat()
+
+            # дальше всё как было:
             meta_params = (meta.get("params") or {})
             pay_params  = (payload.get("params") or {})
 
@@ -743,6 +784,7 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
             )
             if isinstance(tag_ids, (list, tuple)):
                 tag_ids = ",".join(str(x) for x in tag_ids)
+
             if not tag_ids:
                 raise HTTPException(
                     status_code=422,
@@ -752,20 +794,17 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
             proc_name   = "dbo.sp_Telegram_WeeklyShiftCumulative"
             proc_params = _soft_norm({"@week_monday": week_monday, "@tag_ids": tag_ids})
 
+
             # Ожидаем: Period | TagName | CumValue (+ опционально Description)
             cols, rows = _exec_proc_simple(proc_name, proc_params)
             title = (style.get("chart_title") or payload.get("chart_title") or "").strip()
 
             # ---------- подготовка служебных значений ----------
-            weekly_y_mode = _weekly_mode_from(style, payload)   # "delta" | "cum"
+            weekly_y_mode = _weekly_mode_from(style, payload)
             weekly_div    = _weekly_div_from(style, payload)    # делитель (масштаб)
 
-            weekly_unit = (
-                style.get("weekly_unit")
-                or payload.get("weekly_unit")
-                or ""
-            )
-
+            weekly_unit   = style.get("weekly_unit") or payload.get("weekly_unit") or ""
+            weekly_tag_scales = _weekly_tag_scales_from(style, payload)
             # добавляем Delta / Scaled в строки
             def _period_key(p: str) -> tuple:
                 d = p[:10]
@@ -789,24 +828,34 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
                     if prev_cum is None:
                         delta = cv
                     else:
-                        delta = (cv - prev_cum) if (
-                            cv is not None and prev_cum is not None
-                        ) else None
+                        delta = (cv - prev_cum) if (cv is not None and prev_cum is not None) else None
                     prev_cum = cv
 
                     r["Delta"] = delta
 
-                    def _scale(x):
+                    tn = str(r.get("TagName") or "")
+                    tid = str(r.get("TagId") or "")
+
+                    # ←←← главная правка тут
+                    tag_div = (
+                        weekly_tag_scales.get(tn)
+                        or weekly_tag_scales.get(tid)
+                        or weekly_div
+                    )
+
+                    def _scale(x, div):
                         try:
-                            return (float(x) / weekly_div) if (
-                                x is not None and weekly_div
-                            ) else (float(x) if x is not None else None)
+                            if x is None:
+                                return None
+                            div = float(div) if div else 1.0
+                            return float(x) / div if div else float(x)
                         except Exception:
                             return None
 
-                    r["CumValueScaled"] = _scale(cv)
-                    r["DeltaScaled"]    = _scale(delta)
+                    r["CumValueScaled"] = _scale(cv, tag_div)
+                    r["DeltaScaled"]    = _scale(delta, tag_div)
                     r["Unit"]           = weekly_unit
+
 
             # ---- TEXT-режим ----
             if is_text:
@@ -929,113 +978,143 @@ def preview_legacy(payload: Dict[str, Any] = Body(...)):
         # =====================================================================
         # SHIFT: особая логика (как было)
         # =====================================================================
+       # =====================================================================
+# SHIFT: корректная логика закрытой смены + автоконвертация единиц
+# =====================================================================
+# =====================================================================
+# SHIFT: корректная смена, форматирование, единицы, выравнивание
+# =====================================================================
         if period == "shift":
             now = datetime.now()
             today = now.date()
-            date_to = today
-            date_from = today - timedelta(days=1)
 
-            meta_params = (meta.get("params") or {})
-            pay_params  = (payload.get("params") or {})
+            def _parse_time(tstr: str):
+                return datetime.strptime(tstr, "%H:%M:%S").time()
+
+            time_of_day = (
+                payload.get("time_of_day")
+                or meta.get("time_of_day")
+                or (payload.get("params") or {}).get("time_of_day")
+                or "08:00:00"
+            )
+            t = _parse_time(time_of_day)
+
+            # --- Определяем границы смены ---
+            if t == _parse_time("08:00:00"):
+                # ночная
+                shift_no = 2
+                date_to   = datetime.combine(today, _parse_time("08:00:00"))
+                date_from = datetime.combine(today - timedelta(days=1), _parse_time("20:00:00"))
+            else:
+                # дневная
+                shift_no = 1
+                date_from = datetime.combine(today, _parse_time("08:00:00"))
+                date_to   = datetime.combine(today, _parse_time("20:00:00"))
+
+            # --- Теги ---
+            meta_params = meta.get("params") or {}
+            pay_params  = payload.get("params") or {}
 
             tag_ids = (
-                payload.get("tag_ids") or payload.get("@tag_ids") or
-                payload.get("TagIds") or payload.get("@TagIds") or
-                pay_params.get("tag_ids") or pay_params.get("@tag_ids") or
-                pay_params.get("TagIds") or pay_params.get("@TagIds") or
-                meta_params.get("tag_ids") or meta_params.get("@tag_ids") or
-                meta_params.get("TagIds") or meta_params.get("@TagIds")
+                payload.get("tag_ids")
+                or meta_params.get("tag_ids")
+                or pay_params.get("tag_ids")
+                or get_tag_ids_for_template(template_id)
             )
-            if not tag_ids:
-                tag_ids = get_tag_ids_for_template(template_id)
 
             if isinstance(tag_ids, (list, tuple)):
                 tag_ids = ",".join(str(x) for x in tag_ids)
 
-            if not tag_ids:
-                raise HTTPException(
-                    status_code=422,
-                    detail="shift: не передан список тегов (@TagIds/@tag_ids)",
-                )
-
             proc_name   = "dbo.sp_Telegram_BalanceReport_Shift"
             proc_params = _soft_norm({
-                "@date_from": date_from.isoformat(),
-                "@date_to":   date_to.isoformat(),
+                "@date_from": date_from.date().isoformat(),
+                "@date_to":   date_to.date().isoformat(),
                 "@tag_ids":   tag_ids,
             })
 
             cols, rows = _exec_proc_simple(proc_name, proc_params)
-            title = (style.get("chart_title") or payload.get("chart_title") or "").strip()
 
-            if is_text:
-                desc_map = _tag_desc_map_for_template(template_id)
+            # --- Фильтруем только текущую смену ---
+            rows = [r for r in rows if r.get("ShiftNo") == shift_no]
 
-                custom = (
-                    style.get("description_overrides")
-                    or payload.get("description_overrides")
-                    or {}
+            # --- Парсим единицы и формируем конечное значение ---
+            def detect_multiplier_and_clean(desc: str):
+                if not desc:
+                    return 1, ""
+                d = desc.lower()
+                multiplier = 1000 if ("т" in d and "кг" not in d) else 1
+                cleaned = (
+                    desc.replace(", т", "")
+                        .replace(", кг", "")
+                        .replace("(т)", "")
+                        .replace("(кг)", "")
+                        .replace("[t]", "")
+                        .replace("[kg]", "")
+                        .strip()
                 )
-                if isinstance(custom, str):
-                    try:
-                        custom = json.loads(custom)
-                    except Exception:
-                        custom = {}
+                return multiplier, cleaned
 
-                txt_tpl = (
-                    style.get("text_template")
-                    or payload.get("text_template")
-                    or "{Date} {Description} {Прирост}"
-                ).strip()
+            # выводим всё в кг
+            output_unit = "kg"
 
-                prepared = []
-                for r in rows:
-                    rr = dict(r)
-                    tn = str(r.get("TagName") or "")
-                    rr.setdefault(
-                        "Description",
-                        rr.get("Description")
-                        or custom.get(tn)
-                        or desc_map.get(tn)
-                        or tn,
-                    )
-                    prepared.append(rr)
+            processed = []
+            for r in rows:
+                rr = dict(r)
+                desc = rr.get("Description") or ""
+                mult, clean_desc = detect_multiplier_and_clean(desc)
 
-                rendered = _render_text_rows(
-                    rows=prepared,
-                    template=txt_tpl,
-                    weekly_alias=False,
-                    desc_map=desc_map,
-                    custom_desc=custom,
-                )
+                delta = rr.get("Прирост") or 0
+                value_kg = float(delta) * mult
 
-                return {
-                    "ok": True,
-                    "title": title,
-                    "columns": cols,
-                    "data": rows,
-                    "text": rendered,
-                    "text_table": rendered,
-                    "period": {
-                        "mode": "shift",
-                        "date_from": date_from.isoformat(),
-                        "date_to":   date_to.isoformat(),
-                    },
-                }
+                # убираем дробь полностью
+                final_value = int(round(value_kg))
 
-            tbl = _make_text_table_simple(cols, rows, None)
+                rr["CleanDescription"] = clean_desc
+                rr["ValueFinal"] = final_value
+                processed.append(rr)
+
+            # --- Автоматическое добавление (кг) в заголовок ---
+            title_base = (
+                style.get("chart_title")
+                or payload.get("chart_title")
+                or "Отчёт"
+            )
+            title = f"{title_base} (кг)"
+
+            # --- КРАСИВАЯ ВЫРОВНЕННАЯ ТАБЛИЦА ---
+            # 1) ищем максимальную длину описания
+# ========== КРАСИВАЯ РОВНАЯ МОНОШИРИННАЯ ТАБЛИЦА ==========
+# 1) max длина описания
+            max_desc = max(len(r["CleanDescription"]) for r in processed) if processed else 0
+
+            lines = []
+            for r in processed:
+                date = str(r.get("Date"))
+                desc = r["CleanDescription"].ljust(max_desc)
+                val  = str(r["ValueFinal"]).rjust(8)
+                lines.append(f"{date}  {desc}  {val}")
+
+            raw_table = "\n".join(lines)
+
+            # ОБОРАЧИВАЕМ В МАРКДАУН-БЛОК ДЛЯ TELEGRAM / PREVIEW
+            rendered = f"```\n{raw_table}\n```"
+
             return {
                 "ok": True,
                 "title": title,
-                "columns": cols,
-                "data": rows,
-                "text_table": tbl,
+                "columns": ["Date", "Description", "Value"],
+                "data": processed,
+                "text": rendered,
+                "text_table": rendered,
                 "period": {
                     "mode": "shift",
                     "date_from": date_from.isoformat(),
                     "date_to":   date_to.isoformat(),
                 },
             }
+
+
+
 
         # =====================================================================
         # НЕ weekly/shift: через общий превью-движок

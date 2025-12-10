@@ -1,15 +1,39 @@
 // client/src/shared/http.ts
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/**
+ * Универсальное определение API_BASE.
+ * Dev: localhost:5173 → http://localhost:8000
+ * Prod: любой другой origin → https://origin/api
+ * Если в env задан VITE_API_BASE и он не localhost → используем его.
+ */
 function inferApiBase(): string {
-  const envBase = (import.meta as any).env?.VITE_API_BASE?.trim();
-  if (envBase) return envBase;
-  if (typeof window !== "undefined") {
-    // dev-эвристика: если запущено с Vite на 5173 — считаем API на 8000
-    if (window.location.port === "5173") return "http://localhost:8000";
+  const raw = (import.meta as any).env?.VITE_API_BASE;
+  const envBase = raw ? String(raw).trim() : "";
+
+  // Если явно задан адрес и он НЕ localhost — используем его как абсолютный.
+  if (
+    envBase &&
+    !envBase.startsWith("http://localhost") &&
+    !envBase.startsWith("https://localhost")
+  ) {
+    return envBase;
   }
-  // пустая база — fetch будет по относительным путям (ровно как передал)
-  return "";
+
+  if (typeof window !== "undefined") {
+    const { hostname, port, origin } = window.location;
+
+    // DEV (vite): localhost:5173 → backend на 8000
+    if (hostname === "localhost" && port === "5173") {
+      return "http://localhost:8000";
+    }
+
+    // PROD: всегда "текущий origin + /api"
+    return `${origin}/api`;
+  }
+
+  // fallback
+  return "/api";
 }
 
 const API_BASE = inferApiBase();
@@ -54,7 +78,9 @@ export async function http<T = any>(
 
   if (!res.ok) {
     let detail: any = undefined;
-    try { detail = await res.json(); } catch { /* ignore */ }
+    try {
+      detail = await res.json();
+    } catch {}
     const err = new Error(`HTTP ${res.status}`);
     (err as any).status = res.status;
     (err as any).detail = detail;
@@ -62,6 +88,7 @@ export async function http<T = any>(
   }
 
   if (res.status === 204) return undefined as T;
+
   const ct = res.headers.get("content-type") || "";
   return (ct.includes("application/json")
     ? await res.json()

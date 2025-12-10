@@ -15,6 +15,7 @@ type StyleOverride = {
   weekly_y?: "Delta" | "CumValue";   // что выводим по оси Y
   weekly_scale?: number;             // на сколько делим (1000 = кг → т)
   weekly_unit?: string;              // подпись единицы (“т”)
+  weekly_tag_scale?: Record<string, number> | string;
 };
 
 type Props = {
@@ -59,16 +60,55 @@ const ScheduleStyleModal: React.FC<Props> = ({ open, onClose, initial, onSave, a
   };
 
   // При сохранении мягко приводим weekly_scale к числу
-  const handleFinish = (values: StyleOverride) => {
-    const v: StyleOverride = { ...values };
-    if (v.weekly_scale !== undefined && v.weekly_scale !== null) {
-      // приведение “1000” -> 1000
-      const num = Number(v.weekly_scale);
-      if (!Number.isNaN(num) && num > 0) v.weekly_scale = num;
-      else delete v.weekly_scale;
+ const handleFinish = (values: StyleOverride) => {
+  const v: StyleOverride = { ...values };
+
+  // общий масштаб
+  if (v.weekly_scale !== undefined && v.weekly_scale !== null) {
+    const num = Number(v.weekly_scale);
+    if (!Number.isNaN(num) && num > 0) v.weekly_scale = num;
+    else delete v.weekly_scale;
+  }
+
+  // индивидуальные масштабы по тегам
+  if (v.weekly_tag_scale !== undefined && v.weekly_tag_scale !== null) {
+    let parsed: Record<string, number> | null = null;
+
+    if (typeof v.weekly_tag_scale === "string") {
+      try {
+        const obj = JSON.parse(v.weekly_tag_scale);
+        if (obj && typeof obj === "object") {
+          parsed = {};
+          for (const [k, val] of Object.entries(obj)) {
+            const num = Number(val);
+            if (!Number.isNaN(num) && num > 0) {
+              parsed[k] = num;
+            }
+          }
+        }
+      } catch {
+        parsed = null;
+      }
+    } else if (typeof v.weekly_tag_scale === "object") {
+      parsed = {};
+      for (const [k, val] of Object.entries(v.weekly_tag_scale)) {
+        const num = Number(val);
+        if (!Number.isNaN(num) && num > 0) {
+          parsed[k] = num;
+        }
+      }
     }
-    onSave(v);
-  };
+
+    if (parsed && Object.keys(parsed).length > 0) {
+      v.weekly_tag_scale = parsed;
+    } else {
+      delete v.weekly_tag_scale;
+    }
+  }
+
+  onSave(v);
+};
+
 
   return (
     <Modal
@@ -205,7 +245,16 @@ const ScheduleStyleModal: React.FC<Props> = ({ open, onClose, initial, onSave, a
                   >
                     <InputNumber min={0} step={1} placeholder="1000" style={{ width: 200 }} />
                   </Form.Item>
-
+                  <Form.Item
+                    name="weekly_tag_scale"
+                    label="Weekly: индивидуальный масштаб по тегам"
+                    tooltip='JSON: TagName или TagId → делитель. Например: { "AccWeight": 1000, "FT_E0125H_01_ACC": 1 }'
+                  >
+                    <TextArea
+                      rows={4}
+                      placeholder='{"AccWeight":1000,"FT_E0125H_01_ACC":1,"FT_P0535T_02_ACC":1,"P06210_01_total":1000}'
+                    />
+                  </Form.Item>
                   <Form.Item
                     name="weekly_unit"
                     label="Weekly: единица измерения"

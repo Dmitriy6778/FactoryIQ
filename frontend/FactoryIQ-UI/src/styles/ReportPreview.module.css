@@ -9,3 +9,16 @@
   font-family: inherit; /* чтобы не было моноширинного вида, если не хотите */
   line-height: 1.35;
 }
+
+.codeBlock {
+  white-space: pre;               /* НЕ переносить строки */
+  overflow-x: auto;               /* горизонтальный скролл */
+  font-family: "Courier New", Consolas, monospace !important;
+  font-size: 14px;
+  line-height: 1.35;
+  background: #fdfdfd;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #eee;
+  margin: 0;
+}

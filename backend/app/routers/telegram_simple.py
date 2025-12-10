@@ -307,137 +307,87 @@ def _render_line(series: List[Dict[str, Any]], title: str) -> str:
 
 def _render_bar(series: List[Dict[str, Any]], title: str) -> str:
     """
-    Улучшенная bar-диаграмма:
-    - толщина столбцов зависит от числа серий (без налезания)
-    - подписи только для достаточно «заметных» значений (мелкие ~0 не подписываем)
-    - небольшой запас сверху по Y для цифр
+    ИДЕАЛЬНОЕ построение групповых bar-диаграмм без слипания и смещений.
     """
     if not series:
         return ""
 
     x_labels = series[0]["x"]
     n = len(x_labels)
-    m = max(1, len(series))  # кол-во серий
+    m = len(series)
 
     idx = np.arange(n)
 
-    # --- ширина бара в зависимости от числа серий ---
-    if m == 1:
-        bar_width = 0.6   # жирные одиночные
-    elif m == 2:
-        bar_width = 0.38
-    elif m == 3:
-        bar_width = 0.30
-    else:
-        bar_width = 0.24  # 4+ серий
+    # --- Правильная геометрия (гарантия отсутствия перемешивания) ---
+    total_width = 0.8          # ширина кластера баров над одним X
+    bar_width = total_width / m * 0.8  # сами бары тоньше внутри кластера
+    spacing = total_width / m          # расстояние между центрами баров
 
-    group_width = bar_width * m  # суммарная ширина пучка на категорию
-
-    # Чуть растягиваем картинку, если очень много колонок
-    if n <= 15:
-        fig_w = 8.5
-    elif n <= 25:
-        fig_w = 10
-    else:
-        fig_w = 12
-
-    fig, ax = plt.subplots(figsize=(fig_w, 4.5), dpi=140)  # было 4
+    # Широкая фигура
+    fig_w = 14
+    fig, ax = plt.subplots(figsize=(fig_w, 5), dpi=140)
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # общий максимум по всем сериям
-    all_vals: List[float] = []
-    for s in series:
-        for v in s["y"]:
-            try:
-                all_vals.append(float(v))
-            except Exception:
-                pass
+    # Y диапазон
+    vals = [float(v) for s in series for v in s["y"] if v not in (None, "")]
+    ymax = max(vals) if vals else 1
+    ax.set_ylim(0, ymax * 1.25)
 
-    global_max = max(all_vals) if all_vals else 1.0
-    if global_max <= 0:
-        global_max = 1.0
+    label_threshold = max(ymax * 0.03, 0.1)
 
-    y_top = global_max * 1.2
-    ax.set_ylim(0, y_top)
-
-    def fontsize_for(val: float) -> int:
-        s = f"{val:.1f}"
-        L = len(s)
-        if L <= 3:
-            return 11
-        if L <= 5:
-            return 10
-        if L <= 7:
-            return 9
-        return 8
-
-    # порог, ниже которого подписи не выводим (и «0.0» исчезнут)
-    label_threshold = max(global_max * 0.03, 0.1)
-
-    # --- рисуем серии ---
+    # --- Рисуем серии строго по формуле ---
     for i, s in enumerate(series):
-        # центрируем пучок вокруг каждой позиции idx
-        xs = idx - group_width / 2 + (i + 0.5) * bar_width
+        xs = idx + (i - (m - 1) / 2) * spacing
         ys = s["y"]
 
-        ax.bar(xs, ys, bar_width, label=s.get("name", "Серия"))
+        ax.bar(xs, ys, bar_width, label=s["name"])
 
-        # подписи над столбцами
+        # подписи
         for x, v in zip(xs, ys):
             try:
                 val = float(v)
-            except Exception:
+            except:
                 continue
 
-            # мелкие/нулевые не подписываем
-            if abs(val) < label_threshold:
+            if val < label_threshold:
                 continue
-
-            label = f"{val:.1f}"
-            fs = fontsize_for(val)
-
-            y_text = val + global_max * 0.04
-            if y_text > y_top * 0.96:
-                y_text = y_top * 0.96
 
             ax.text(
                 x,
-                y_text,
-                label,
+                val + ymax * 0.04,
+                f"{val:.1f}",
                 ha="center",
                 va="bottom",
-                fontsize=fs,
-                color="#333",
+                fontsize=10,
                 fontweight="bold",
+                color="#222",
             )
 
     ax.set_xticks(idx)
-    ax.set_xticklabels(x_labels, rotation=0, fontsize=10)
-
+    ax.set_xticklabels(x_labels, fontsize=11)
     ax.grid(axis="y", linestyle="--", alpha=0.25)
 
     if m > 1:
-        # Легенда: каждый тег с новой строки (одна колонка)
         ax.legend(
             frameon=False,
             loc="upper center",
-            bbox_to_anchor=(0.5, -0.18),  # чуть ниже графика
-            ncol=1,                       # <-- один столбец: по одной серии в строке
-            fontsize=9,
-            handlelength=1.6,
-            handletextpad=0.6,
+            bbox_to_anchor=(0.5, -0.18),
+            fontsize=10,
+            ncol=1,
         )
 
-
-    ax.set_title(title or "")
+    ax.set_title(title or "", fontsize=14)
 
     buf = io.BytesIO()
     plt.tight_layout()
     fig.savefig(buf, format="png", bbox_inches="tight")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+
 
 
 # ---------- Table renderer (mono text) ----------
